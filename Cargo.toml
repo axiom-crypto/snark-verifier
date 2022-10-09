@@ -50,7 +50,7 @@ sanity_check = []
 
 [patch."https://github.com/privacy-scaling-explorations/halo2"]
 # halo2_proofs = { path = "../halo2/halo2_proofs" }
-halo2_proofs = { git = "https://github.com/zk-attestor/halo2.git", branch = "serialize", package = "halo2_proofs" }
+halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "serialize", package = "halo2_proofs" }
 
 [[example]]
 name = "evm-verifier"
