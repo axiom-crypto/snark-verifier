@@ -179,7 +179,7 @@ fn gen_proof<
     MockProver::run(params.k(), &circuit, instances.clone()).unwrap().assert_satisfied();
     // For testing purposes: Native verify
     // Uncomment to test if evm verifier fails silently
-    {
+    /*{
         let proof = {
             let mut transcript = Blake2bWrite::init(Vec::new());
             create_proof::<
@@ -213,7 +213,7 @@ fn gen_proof<
         let instances = &[instances[0].to_vec()];
         let proof = Plonk::read_proof(&svk, &protocol, instances, &mut transcript).unwrap();
         assert!(Plonk::verify(&svk, &dk, &protocol, instances, &proof).unwrap());
-    }
+    }*/
 
     let instances = instances.iter().map(|instances| instances.as_slice()).collect_vec();
     let proof = {
