@@ -431,7 +431,7 @@ pub fn create_snark<T: TargetCircuit>() -> (ParamsKZG<Bn256>, Snark<G1Affine>) {
     // TODO: need to cache the instances as well!
 
     let proof = {
-        let path = format!("./src/system/halo2/test/data/proof_{}.data", T::NAME);
+        let path = format!("./data/proof_{}.data", T::NAME);
         match std::fs::File::open(path.as_str()) {
             Ok(mut file) => {
                 let mut buf = vec![];
@@ -451,7 +451,8 @@ pub fn create_snark<T: TargetCircuit>() -> (ParamsKZG<Bn256>, Snark<G1Affine>) {
                 )
                 .unwrap();
                 let proof = transcript.finalize();
-                let mut file = std::fs::File::create(path.as_str()).unwrap();
+                let mut file = std::fs::File::create(path.as_str())
+                    .expect(format!("{:?} should exist", path).as_str());
                 file.write_all(&proof).unwrap();
                 proof
             }
