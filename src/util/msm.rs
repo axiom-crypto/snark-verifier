@@ -12,7 +12,7 @@ use std::{
 pub struct Msm<C: CurveAffine, L: Loader<C>> {
     constant: Option<L::LoadedScalar>,
     scalars: Vec<L::LoadedScalar>,
-    bases: Vec<L::LoadedEcPoint>,
+    pub(crate) bases: Vec<L::LoadedEcPoint>,
 }
 
 impl<C, L> Default for Msm<C, L>
@@ -21,11 +21,7 @@ where
     L: Loader<C>,
 {
     fn default() -> Self {
-        Self {
-            constant: None,
-            scalars: Vec::new(),
-            bases: Vec::new(),
-        }
+        Self { constant: None, scalars: Vec::new(), bases: Vec::new() }
     }
 }
 
@@ -35,19 +31,12 @@ where
     L: Loader<C>,
 {
     pub fn constant(constant: L::LoadedScalar) -> Self {
-        Msm {
-            constant: Some(constant),
-            ..Default::default()
-        }
+        Msm { constant: Some(constant), ..Default::default() }
     }
 
     pub fn base(base: L::LoadedEcPoint) -> Self {
         let one = base.loader().load_one();
-        Msm {
-            scalars: vec![one],
-            bases: vec![base],
-            ..Default::default()
-        }
+        Msm { scalars: vec![one], bases: vec![base], ..Default::default() }
     }
 
     pub(crate) fn size(&self) -> usize {
@@ -64,13 +53,7 @@ where
     }
 
     pub fn evaluate(self, gen: Option<C>) -> L::LoadedEcPoint {
-        let gen = gen.map(|gen| {
-            self.bases
-                .first()
-                .unwrap()
-                .loader()
-                .ec_point_load_const(&gen)
-        });
+        let gen = gen.map(|gen| self.bases.first().unwrap().loader().ec_point_load_const(&gen));
         L::LoadedEcPoint::multi_scalar_multiplication(
             iter::empty()
                 .chain(self.constant.map(|constant| (constant, gen.unwrap())))

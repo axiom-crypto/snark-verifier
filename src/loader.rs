@@ -209,6 +209,15 @@ pub trait ScalarLoader<F: PrimeField> {
 pub trait Loader<C: CurveAffine>:
     EcPointLoader<C> + ScalarLoader<C::ScalarExt> + Clone + Debug
 {
+    fn ec_point_select(
+        &self,
+        _a: &Self::LoadedEcPoint,
+        _b: &Self::LoadedEcPoint,
+        _sel: &Self::LoadedScalar,
+    ) -> Result<Self::LoadedEcPoint, Error> {
+        todo!()
+    }
+
     fn start_cost_metering(&self, _: &str) {}
 
     fn end_cost_metering(&self) {}

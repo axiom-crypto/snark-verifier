@@ -29,11 +29,7 @@ pub struct Query<F: PrimeField, T = ()> {
 
 impl<F: PrimeField> Query<F> {
     pub fn with_evaluation<T>(self, eval: T) -> Query<F, T> {
-        Query {
-            poly: self.poly,
-            shift: self.shift,
-            eval,
-        }
+        Query { poly: self.poly, shift: self.shift, eval }
     }
 }
 
@@ -60,6 +56,19 @@ where
         queries: &[Query<C::Scalar, L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<Self::Accumulator, Error>;
+
+    // same as succinct_verify except `use_dummy` is boolean loaded scalar
+    // if `use_dummy` is 1, then put in dummy values to MSM so constraints are satisfies regardless of `proof` values
+    fn succinct_verify_or_dummy(
+        _svk: &Self::SuccinctVerifyingKey,
+        _commitments: &[Msm<C, L>],
+        _point: &L::LoadedScalar,
+        _queries: &[Query<C::Scalar, L::LoadedScalar>],
+        _proof: &Self::Proof,
+        _use_dummy: &L::LoadedScalar,
+    ) -> Result<Self::Accumulator, Error> {
+        todo!()
+    }
 }
 
 pub trait Decider<C, L>: PolynomialCommitmentScheme<C, L>

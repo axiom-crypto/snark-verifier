@@ -71,6 +71,47 @@ where
 
         Ok(accumulators)
     }
+
+    fn succinct_verify_or_dummy(
+        svk: &MOS::SuccinctVerifyingKey,
+        protocol: &Protocol<C>,
+        instances: &[Vec<L::LoadedScalar>],
+        proof: &Self::Proof,
+        use_dummy: &L::LoadedScalar,
+    ) -> Result<Vec<MOS::Accumulator>, Error> {
+        let common_poly_eval = {
+            let mut common_poly_eval = CommonPolynomialEvaluation::new(
+                &protocol.domain,
+                langranges(protocol, instances),
+                &proof.z,
+            );
+
+            L::LoadedScalar::batch_invert(common_poly_eval.denoms());
+            common_poly_eval.evaluate();
+
+            common_poly_eval
+        };
+
+        let mut evaluations = proof.evaluations(protocol, instances, &common_poly_eval)?;
+        let commitments = proof.commitments(protocol, &common_poly_eval, &mut evaluations)?;
+        let queries = proof.queries(protocol, evaluations);
+
+        let accumulator = MOS::succinct_verify_or_dummy(
+            svk,
+            &commitments,
+            &proof.z,
+            &queries,
+            &proof.pcs,
+            use_dummy,
+        )?;
+
+        let accumulators = iter::empty()
+            .chain(Some(accumulator))
+            .chain(proof.old_accumulators.iter().cloned())
+            .collect();
+
+        Ok(accumulators)
+    }
 }
 
 #[derive(Clone, Debug)]

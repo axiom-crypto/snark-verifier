@@ -34,6 +34,14 @@ where
         proof: &Self::Proof,
     ) -> Result<Vec<MOS::Accumulator>, Error>;
 
+    fn succinct_verify_or_dummy(
+        svk: &MOS::SuccinctVerifyingKey,
+        protocol: &Protocol<C>,
+        instances: &[Vec<L::LoadedScalar>],
+        proof: &Self::Proof,
+        use_dummy: &L::LoadedScalar,
+    ) -> Result<Vec<MOS::Accumulator>, Error>;
+
     fn verify(
         svk: &MOS::SuccinctVerifyingKey,
         dk: &MOS::DecidingKey,

@@ -875,6 +875,10 @@ impl<'a, 'b, C: CurveAffine> EcPointLoader<C> for Rc<Halo2Loader<'a, 'b, C>> {
         self.assign_const_ec_point(*ec_point)
     }
 
+    fn ec_point_load_one(&self) -> Self::LoadedEcPoint {
+        self.ec_point(self.assign_const_ec_point(C::generator()).assigned())
+    }
+
     fn ec_point_assert_eq(
         &self,
         annotation: &str,
@@ -897,4 +901,23 @@ impl<'a, 'b, C: CurveAffine> EcPointLoader<C> for Rc<Halo2Loader<'a, 'b, C>> {
     }
 }
 
-impl<'a, 'b, C: CurveAffine> Loader<C> for Rc<Halo2Loader<'a, 'b, C>> {}
+impl<'a, 'b, C: CurveAffine> Loader<C> for Rc<Halo2Loader<'a, 'b, C>> {
+    // only using this when `sel = use_dummy` and `a` is dummy
+    // you should never use dummy if `b` is constant
+    fn ec_point_select(
+        &self,
+        a: &Self::LoadedEcPoint,
+        b: &Self::LoadedEcPoint,
+        sel: &Self::LoadedScalar,
+    ) -> Result<Self::LoadedEcPoint, crate::Error> {
+        if matches!(b.value, Value::Constant(_)) {
+            return Ok(b.clone());
+        }
+        let a = a.assigned();
+        let b = b.assigned();
+        let sel = sel.assigned();
+        let assigned = halo2_ecc::ecc::select(self.field_chip(), &mut self.ctx_mut(), &a, &b, &sel)
+            .expect("ec_point_select should not fail");
+        Ok(self.ec_point(assigned))
+    }
+}

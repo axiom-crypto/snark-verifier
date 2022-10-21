@@ -342,6 +342,7 @@ fn main() {
     end_timer!(deploy_time);
     fs::write("./data/verifier_bytecode.dat", hex::encode(&deployment_code)).unwrap();
 
+    /*
     // use different input snarks to test instances etc
     let app_circuit = StandardPlonk::rand(OsRng);
     let snark = create_snark_shplonk::<StandardPlonk>(
@@ -351,7 +352,7 @@ fn main() {
         None,
     );
     let snarks = vec![snark];
-    let agg_circuit = AggregationCircuit::new(&params, snarks, true);
+    let agg_circuit = AggregationCircuit::new(&params, snarks, true); */
     let proof_time = start_timer!(|| "create agg_circuit proof");
     let proof = gen_proof::<_, _, EvmTranscript<G1Affine, _, _, _>, EvmTranscript<G1Affine, _, _, _>>(
         &params,
