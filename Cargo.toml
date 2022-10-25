@@ -29,7 +29,7 @@ foundry_evm = { git = "https://github.com/jonathanpwang/foundry", package = "fou
 # loader_halo2
 halo2_base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_base", default-features = false, optional = true }
 halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_ecc", default-features = false, optional = true }
-poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", branch = "padding", optional = true }
+poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", tag = "v2022_10_22", optional = true }
 
 [dev-dependencies]
 paste = "1.0.7"
@@ -53,7 +53,7 @@ sanity_check = []
 
 [patch."https://github.com/privacy-scaling-explorations/halo2"]
 halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization", package = "halo2_proofs" }
-
+ 
 [[example]]
 name = "evm-verifier"
 required-features = ["loader_evm", "system_halo2"]

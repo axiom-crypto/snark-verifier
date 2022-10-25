@@ -481,12 +481,14 @@ pub fn gen_vk<ConcreteCircuit: Circuit<Fr>>(
     name: &str,
 ) -> VerifyingKey<G1Affine> {
     let path = format!("./data/{}_{}.vkey", name, params.k());
+    #[cfg(feature = "serialize")]
     match File::open(path.as_str()) {
         Ok(f) => {
-            println!("Reading vkey from {}", path);
+            let read_time = start_timer!(|| format!("Reading vkey from {}", path));
             let mut bufreader = BufReader::new(f);
             let vk = VerifyingKey::read::<_, ConcreteCircuit>(&mut bufreader, params)
                 .expect("Reading vkey should not fail");
+            end_timer!(read_time);
             vk
         }
         Err(_) => {
@@ -499,6 +501,13 @@ pub fn gen_vk<ConcreteCircuit: Circuit<Fr>>(
             vk
         }
     }
+    #[cfg(not(feature = "serialize"))]
+    {
+        let vk_time = start_timer!(|| "vkey");
+        let vk = keygen_vk(params, circuit).unwrap();
+        end_timer!(vk_time);
+        vk
+    }
 }
 
 pub fn gen_pk<ConcreteCircuit: Circuit<Fr>>(
@@ -507,12 +516,14 @@ pub fn gen_pk<ConcreteCircuit: Circuit<Fr>>(
     name: &str,
 ) -> ProvingKey<G1Affine> {
     let path = format!("./data/{}_{}.pkey", name, params.k());
+    #[cfg(feature = "serialize")]
     match File::open(path.as_str()) {
         Ok(f) => {
-            println!("Reading pkey from {}", path);
+            let read_time = start_timer!(|| format!("Reading pkey from {}", path));
             let mut bufreader = BufReader::new(f);
             let pk = ProvingKey::read::<_, ConcreteCircuit>(&mut bufreader, params)
                 .expect("Reading pkey should not fail");
+            end_timer!(read_time);
             pk
         }
         Err(_) => {
@@ -525,6 +536,14 @@ pub fn gen_pk<ConcreteCircuit: Circuit<Fr>>(
             pk.write(&mut f).unwrap();
             pk
         }
+    }
+    #[cfg(not(feature = "serialize"))]
+    {
+        let vk = gen_vk::<ConcreteCircuit>(params, circuit, name);
+        let pk_time = start_timer!(|| "pkey");
+        let pk = keygen_pk(params, vk, circuit).unwrap();
+        end_timer!(pk_time);
+        pk
     }
 }
 
@@ -633,9 +652,11 @@ pub fn create_snark_shplonk<T: TargetCircuit>(
             && Path::new(path.as_str()).exists()
             && cached_instances.unwrap() == instances
         {
+            let proof_time = start_timer!(|| "read proof");
             let mut file = File::open(path.as_str()).unwrap();
             let mut buf = vec![];
             file.read_to_end(&mut buf).unwrap();
+            end_timer!(proof_time);
             buf
         } else {
             let proof_time = start_timer!(|| "create proof");
