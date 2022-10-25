@@ -306,9 +306,11 @@ pub fn load_verify_circuit_degree() -> u32 {
 
 impl TargetCircuit for StandardPlonk {
     const N_PROOFS: usize = 1;
-    const NAME: &'static str = "standard_plonk";
 
     type Circuit = Self;
+    fn name() -> String {
+        "standard_plonk".to_string()
+    }
 }
 
 fn main() {

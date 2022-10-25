@@ -605,9 +605,10 @@ pub fn write_instances(instances: &Vec<Vec<Vec<Fr>>>, path: &str) {
 
 pub trait TargetCircuit {
     const N_PROOFS: usize;
-    const NAME: &'static str;
 
     type Circuit: Circuit<Fr>;
+
+    fn name() -> String;
 }
 
 // this is a toggle that should match the fork of halo2_proofs you are using
@@ -621,7 +622,7 @@ pub fn create_snark_shplonk<T: TargetCircuit>(
     instances: Vec<Vec<Vec<Fr>>>, // instances[i][j][..] is the i-th circuit's j-th instance column
     accumulator_indices: Option<Vec<(usize, usize)>>,
 ) -> Snark {
-    println!("CREATING SNARK FOR: {}", T::NAME);
+    println!("CREATING SNARK FOR: {}", T::name());
     let config = if let Some(accumulator_indices) = accumulator_indices {
         Config::kzg(KZG_QUERY_INSTANCE)
             .set_zk(true)
@@ -631,7 +632,7 @@ pub fn create_snark_shplonk<T: TargetCircuit>(
         Config::kzg(KZG_QUERY_INSTANCE).set_zk(true).with_num_proof(T::N_PROOFS)
     };
 
-    let pk = gen_pk(params, &circuits[0], T::NAME);
+    let pk = gen_pk(params, &circuits[0], T::name().as_str());
     // num_instance[i] is length of the i-th instance columns in circuit 0 (all circuits should have same shape of instances)
     let num_instance = instances[0].iter().map(|instance_column| instance_column.len()).collect();
     let protocol = compile(params, pk.get_vk(), config.with_num_instance(num_instance));
@@ -645,9 +646,10 @@ pub fn create_snark_shplonk<T: TargetCircuit>(
     // TODO: need to cache the instances as well!
 
     let proof = {
-        let path = format!("./data/proof_{}_{}.dat", T::NAME, params.k());
-        let instance_path = format!("./data/instances_{}_{}.dat", T::NAME, params.k());
+        let path = format!("./data/proof_{}_{}.dat", T::name(), params.k());
+        let instance_path = format!("./data/instances_{}_{}.dat", T::name(), params.k());
         let cached_instances = read_instances::<T>(instance_path.as_str());
+        #[cfg(feature = "serialize")]
         if cached_instances.is_some()
             && Path::new(path.as_str()).exists()
             && cached_instances.unwrap() == instances
@@ -674,6 +676,23 @@ pub fn create_snark_shplonk<T: TargetCircuit>(
             let mut file = File::create(path.as_str()).unwrap();
             file.write_all(&proof).unwrap();
             write_instances(&instances, instance_path.as_str());
+            end_timer!(proof_time);
+            proof
+        }
+        #[cfg(not(feature = "serialize"))]
+        {
+            let proof_time = start_timer!(|| "create proof");
+            let mut transcript = PoseidonTranscript::<NativeLoader, Vec<u8>, _>::init(Vec::new());
+            create_proof::<KZGCommitmentScheme<_>, ProverSHPLONK<_>, ChallengeScalar<_>, _, _, _>(
+                params,
+                &pk,
+                &circuits,
+                instances2.as_slice(),
+                &mut ChaCha20Rng::from_seed(Default::default()),
+                &mut transcript,
+            )
+            .unwrap();
+            let proof = transcript.finalize();
             end_timer!(proof_time);
             proof
         }
