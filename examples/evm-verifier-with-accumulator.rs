@@ -39,7 +39,11 @@ use plonk_verifier::{
     verifier::{self, PlonkVerifier},
 };
 use rand::rngs::OsRng;
-use std::{fs, io::Cursor, rc::Rc};
+use std::{
+    fs::{self, File},
+    io::Cursor,
+    rc::Rc,
+};
 
 const LIMBS: usize = 3;
 const BITS: usize = 88;
@@ -296,11 +300,12 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 }
 
 pub fn load_verify_circuit_degree() -> u32 {
-    let path = "./configs/verify_circuit.config";
-    let params_str =
-        std::fs::read_to_string(path).expect(format!("{} file should exist", path).as_str());
+    let path = std::env::var("VERIFY_CONFIG").expect("export VERIFY_CONFIG with config path");
     let params: plonk_verifier::system::halo2::Halo2VerifierCircuitConfigParams =
-        serde_json::from_str(params_str.as_str()).unwrap();
+        serde_json::from_reader(
+            File::open(path.clone()).expect(format!("{} file should exist", path).as_str()),
+        )
+        .unwrap();
     params.degree
 }
 
@@ -314,6 +319,7 @@ impl TargetCircuit for StandardPlonk {
 }
 
 fn main() {
+    std::env::set_var("VERIFY_CONFIG", "./configs/verify_circuit.config");
     let k = load_verify_circuit_degree();
     let params = gen_srs(k);
 

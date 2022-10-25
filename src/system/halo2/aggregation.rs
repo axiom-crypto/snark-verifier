@@ -47,7 +47,7 @@ use num_bigint::BigUint;
 use num_traits::Num;
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{BufReader, BufWriter, Cursor, Read, Write},
     path::Path,
     rc::Rc,
@@ -440,10 +440,11 @@ impl Circuit<Fr> for AggregationCircuit {
     }
 
     fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-        let path = "./configs/verify_circuit.config";
-        let params_str = fs::read_to_string(path).expect(format!("{} should exist", path).as_str());
-        let params: Halo2VerifierCircuitConfigParams =
-            serde_json::from_str(params_str.as_str()).unwrap();
+        let path = std::env::var("VERIFY_CONFIG").expect("export VERIFY_CONFIG with config path");
+        let params: Halo2VerifierCircuitConfigParams = serde_json::from_reader(
+            File::open(path.as_str()).expect(format!("{} file should exist", path).as_str()),
+        )
+        .unwrap();
 
         Halo2VerifierCircuitConfig::configure(meta, params)
     }
@@ -612,7 +613,7 @@ pub trait TargetCircuit {
 }
 
 // this is a toggle that should match the fork of halo2_proofs you are using
-// the current default in PSE/main is `false`, before 2022_10_22 it was `false`:
+// the current default in PSE/main is `false`, before 2022_10_22 it was `true`:
 // see https://github.com/privacy-scaling-explorations/halo2/pull/96/files
 pub const KZG_QUERY_INSTANCE: bool = false;
 
