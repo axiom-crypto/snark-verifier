@@ -1,6 +1,6 @@
 use super::{BITS, LIMBS};
 use crate::{
-    loader::{self, native::NativeLoader},
+    loader::{self, native::NativeLoader, Loader},
     pcs::{
         kzg::{
             Bdfg21, Kzg, KzgAccumulator, KzgAs, KzgAsProvingKey, KzgAsVerifyingKey,
@@ -124,6 +124,14 @@ impl SnarkWitness {
         }
     }
 
+    pub fn protocol(&self) -> &Protocol<G1Affine> {
+        &self.protocol
+    }
+
+    pub fn instances(&self) -> &[Vec<Value<Fr>>] {
+        &self.instances
+    }
+
     pub fn proof(&self) -> Value<&[u8]> {
         self.proof.as_ref().map(Vec::as_slice)
     }
@@ -187,6 +195,98 @@ pub fn aggregate<'a, 'b>(
         .chain(instances_to_expose.iter())
         .cloned()
         .collect_vec()
+}
+
+pub fn recursive_aggregate<'a, 'b>(
+    svk: &Svk,
+    loader: &Rc<Halo2Loader<'a, 'b>>,
+    snarks: &[SnarkWitness],
+    recursive_snark: &SnarkWitness,
+    as_vk: &AsVk,
+    as_proof: Value<&'_ [u8]>,
+    use_dummy: AssignedValue<Fr>,
+) -> (Vec<AssignedValue<Fr>>, Vec<Vec<AssignedValue<Fr>>>) {
+    let assign_instances = |instances: &[Vec<Value<Fr>>]| {
+        instances
+            .iter()
+            .map(|instances| {
+                instances.iter().map(|instance| loader.assign_scalar(*instance)).collect_vec()
+            })
+            .collect_vec()
+    };
+
+    let mut assigned_instances = vec![];
+    let mut accumulators = snarks
+        .iter()
+        .flat_map(|snark| {
+            let instances = assign_instances(&snark.instances);
+            assigned_instances.push(
+                instances
+                    .iter()
+                    .flat_map(|instance| instance.iter().map(|scalar| scalar.assigned()))
+                    .collect_vec(),
+            );
+            let mut transcript =
+                PoseidonTranscript::<Rc<Halo2Loader>, _, _>::new(loader, snark.proof());
+            let proof =
+                Plonk::read_proof(svk, &snark.protocol, &instances, &mut transcript).unwrap();
+            Plonk::succinct_verify(svk, &snark.protocol, &instances, &proof).unwrap()
+        })
+        .collect_vec();
+
+    let use_dummy = loader.scalar_from_assigned(use_dummy);
+
+    let prev_instances = assign_instances(&recursive_snark.instances);
+    let mut accs = {
+        let mut transcript =
+            PoseidonTranscript::<Rc<Halo2Loader>, _, _>::new(loader, recursive_snark.proof());
+        let proof =
+            Plonk::read_proof(svk, &recursive_snark.protocol, &prev_instances, &mut transcript)
+                .unwrap();
+        let mut accs = Plonk::succinct_verify_or_dummy(
+            svk,
+            &recursive_snark.protocol,
+            &prev_instances,
+            &proof,
+            &use_dummy,
+        )
+        .unwrap();
+        for acc in accs.iter_mut() {
+            (*acc).lhs =
+                loader.ec_point_select(&accumulators[0].lhs, &acc.lhs, &use_dummy).unwrap();
+            (*acc).rhs =
+                loader.ec_point_select(&accumulators[0].rhs, &acc.rhs, &use_dummy).unwrap();
+        }
+        accs
+    };
+    accumulators.append(&mut accs);
+
+    let KzgAccumulator { lhs, rhs } = {
+        let mut transcript = PoseidonTranscript::<Rc<Halo2Loader>, _, _>::new(loader, as_proof);
+        let proof = As::read_proof(as_vk, &accumulators, &mut transcript).unwrap();
+        As::verify(as_vk, &accumulators, &proof).unwrap()
+    };
+
+    let lhs = lhs.assigned();
+    let rhs = rhs.assigned();
+
+    let mut new_instances = prev_instances
+        .iter()
+        .flat_map(|instance| instance.iter().map(|scalar| scalar.assigned()))
+        .collect_vec();
+    for (i, acc_limb) in lhs
+        .x
+        .truncation
+        .limbs
+        .iter()
+        .chain(lhs.y.truncation.limbs.iter())
+        .chain(rhs.x.truncation.limbs.iter())
+        .chain(rhs.y.truncation.limbs.iter())
+        .enumerate()
+    {
+        new_instances[i] = acc_limb.clone();
+    }
+    (new_instances, assigned_instances)
 }
 
 #[derive(Clone)]
@@ -492,9 +592,9 @@ pub trait TargetCircuit {
 }
 
 // this is a toggle that should match the fork of halo2_proofs you are using
-// the current default in PSE/main is `true`, while there is a PR to make it `false`:
+// the current default in PSE/main is `false`, before 2022_10_22 it was `false`:
 // see https://github.com/privacy-scaling-explorations/halo2/pull/96/files
-pub const KZG_QUERY_INSTANCE: bool = true;
+pub const KZG_QUERY_INSTANCE: bool = false;
 
 pub fn create_snark_shplonk<T: TargetCircuit>(
     params: &ParamsKZG<Bn256>,

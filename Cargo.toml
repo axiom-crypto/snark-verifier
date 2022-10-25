@@ -16,10 +16,10 @@ serde_json  = "1.0"
 hex = "0.4.3"
 ark-std = { version = "0.3", features = ["print-trace"] }
 
-halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.2.1", package = "halo2curves" }
+halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.0", package = "halo2curves" }
 
 # system_halo2
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2022_09_10", optional = true }
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2022_10_22", optional = true }
 
 # loader_evm
 ethereum_types = { package = "ethereum-types", version = "0.13.1", default-features = false, features = ["std"], optional = true }
@@ -43,11 +43,12 @@ zkevm_circuit_benchmarks = {git = "https://github.com/privacy-scaling-exploratio
 zkevm_circuits = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "zkevm-circuits" }
 
 [features]
-default = ["loader_evm", "loader_halo2", "system_halo2", "display"]
+default = ["loader_evm", "loader_halo2", "system_halo2", "display", "serialize"]
 loader_evm = ["dep:ethereum_types", "dep:sha3", "dep:foundry_evm"]
 loader_halo2 = ["dep:halo2_proofs", "dep:halo2_base", "halo2_ecc", "dep:poseidon"]
 system_halo2 = ["dep:halo2_proofs"]
 display = ["halo2_ecc/display"]
+serialize = []
 sanity_check = []
 
 [patch."https://github.com/privacy-scaling-explorations/halo2"]

@@ -86,7 +86,7 @@ where
         self.ctx.borrow()
     }
 
-    pub(crate) fn ctx_mut(&self) -> impl DerefMut<Target = Context<'b, C::Scalar>> + '_ {
+    pub fn ctx_mut(&self) -> impl DerefMut<Target = Context<'b, C::Scalar>> + '_ {
         self.ctx.borrow_mut()
     }
 
@@ -137,6 +137,10 @@ where
         let index = *self.num_scalar.borrow();
         *self.num_scalar.borrow_mut() += 1;
         Scalar { loader: self.clone(), index, value }
+    }
+
+    pub fn scalar_from_assigned(self: &Rc<Self>, assigned: AssignedValue<C>) -> Scalar<'a, 'b, C> {
+        self.scalar(Value::Assigned(assigned))
     }
 
     pub fn ec_point(self: &Rc<Self>, assigned: AssignedEcPoint<C>) -> EcPoint<'a, 'b, C> {
