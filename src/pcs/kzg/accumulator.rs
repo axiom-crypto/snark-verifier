@@ -137,20 +137,19 @@ mod halo2 {
         Error,
     };
     use halo2_proofs::circuit::Value;
-    use halo2_wrong_ecc::{maingate::AssignedValue, AssignedPoint};
     use std::{iter, rc::Rc};
 
     fn ec_point_from_assigned_limbs<C: CurveAffine, const LIMBS: usize, const BITS: usize>(
-        limbs: &[AssignedValue<C::Scalar>],
+        limbs: &[Value<&C::Scalar>],
     ) -> Value<C> {
         assert_eq!(limbs.len(), 2 * LIMBS);
 
         let [x, y] = [&limbs[..LIMBS], &limbs[LIMBS..]].map(|limbs| {
             limbs
                 .iter()
-                .map(|assigned| assigned.value())
+                .map(|limb| limb.map(|x| *x))
                 .fold_zipped(Vec::new(), |mut acc, limb| {
-                    acc.push(*limb);
+                    acc.push(limb);
                     acc
                 })
                 .map(|limbs| fe_from_limbs::<_, _, LIMBS, BITS>(limbs.try_into().unwrap()))
@@ -159,50 +158,124 @@ mod halo2 {
         x.zip(y).map(|(x, y)| C::from_xy(x, y).unwrap())
     }
 
-    impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
-        AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS> for LimbsEncoding<LIMBS, BITS>
-    where
-        C: CurveAffine,
-        PCS: PolynomialCommitmentScheme<
-            C,
-            Rc<Halo2Loader<'a, C, EccChip>>,
-            Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
-        >,
-        EccChip: EccInstructions<
-            'a,
-            C,
-            AssignedEcPoint = AssignedPoint<<C as CurveAffine>::Base, C::Scalar, LIMBS, BITS>,
-            AssignedScalar = AssignedValue<C::Scalar>,
-        >,
-    {
-        fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {
-            assert_eq!(limbs.len(), 4 * LIMBS);
+    /*
+    mod halo2_wrong {
+        use super::*;
+        use halo2_wrong_ecc::{maingate::AssignedValue, AssignedPoint};
 
-            let loader = limbs[0].loader();
+        impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
+            AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS>
+            for LimbsEncoding<LIMBS, BITS>
+        where
+            C: CurveAffine,
+            PCS: PolynomialCommitmentScheme<
+                C,
+                Rc<Halo2Loader<'a, C, EccChip>>,
+                Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
+            >,
+            EccChip: EccInstructions<
+                'a,
+                C,
+                AssignedEcPoint = AssignedPoint<<C as CurveAffine>::Base, C::Scalar, LIMBS, BITS>,
+                AssignedScalar = AssignedValue<C::Scalar>,
+            >,
+        {
+            fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {
+                assert_eq!(limbs.len(), 4 * LIMBS);
 
-            let assigned_limbs = limbs.iter().map(|limb| limb.assigned()).collect_vec();
-            let [lhs, rhs] = [&assigned_limbs[..2 * LIMBS], &assigned_limbs[2 * LIMBS..]].map(
-                |assigned_limbs| {
-                    let ec_point = ec_point_from_assigned_limbs::<_, LIMBS, BITS>(assigned_limbs);
-                    loader.assign_ec_point(ec_point)
-                },
-            );
+                let loader = limbs[0].loader();
 
-            for (src, dst) in assigned_limbs.iter().zip(
-                iter::empty()
-                    .chain(lhs.assigned().x().limbs())
-                    .chain(lhs.assigned().y().limbs())
-                    .chain(rhs.assigned().x().limbs())
-                    .chain(rhs.assigned().y().limbs()),
-            ) {
-                loader
-                    .ctx_mut()
-                    .constrain_equal(src.cell(), dst.as_ref().cell())
-                    .unwrap();
+                let assigned_limbs = limbs.iter().map(|limb| limb.assigned()).collect_vec();
+                let [lhs, rhs] = [&assigned_limbs[..2 * LIMBS], &assigned_limbs[2 * LIMBS..]].map(
+                    |assigned_limbs| {
+                        let ec_point = ec_point_from_assigned_limbs::<_, LIMBS, BITS>(
+                            assigned_limbs
+                                .iter()
+                                .map(|assigned| assigned.value())
+                                .collect()
+                                .as_slice(),
+                        );
+                        loader.assign_ec_point(ec_point)
+                    },
+                );
+
+                for (src, dst) in assigned_limbs.iter().zip(
+                    iter::empty()
+                        .chain(lhs.assigned().x().limbs())
+                        .chain(lhs.assigned().y().limbs())
+                        .chain(rhs.assigned().x().limbs())
+                        .chain(rhs.assigned().y().limbs()),
+                ) {
+                    loader
+                        .ctx_mut()
+                        .constrain_equal(src.cell(), dst.as_ref().cell())
+                        .unwrap();
+                }
+                let accumulator = KzgAccumulator::new(lhs, rhs);
+
+                Ok(accumulator)
             }
-            let accumulator = KzgAccumulator::new(lhs, rhs);
+        }
+    }
+    */
 
-            Ok(accumulator)
+    mod halo2_lib {
+        use super::*;
+        use halo2_base::AssignedValue;
+        use halo2_ecc::{bigint::CRTInteger, ecc::EccPoint};
+
+        impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
+            AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS>
+            for LimbsEncoding<LIMBS, BITS>
+        where
+            C: CurveAffine,
+            PCS: PolynomialCommitmentScheme<
+                C,
+                Rc<Halo2Loader<'a, C, EccChip>>,
+                Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
+            >,
+            EccChip: EccInstructions<
+                'a,
+                C,
+                AssignedEcPoint = EccPoint<C::Scalar, CRTInteger<C::Scalar>>,
+                AssignedScalar = AssignedValue<C::Scalar>,
+            >,
+        {
+            fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {
+                assert_eq!(limbs.len(), 4 * LIMBS);
+
+                let loader = limbs[0].loader();
+
+                let assigned_limbs = limbs.iter().map(|limb| limb.assigned()).collect_vec();
+                let [lhs, rhs] = [&assigned_limbs[..2 * LIMBS], &assigned_limbs[2 * LIMBS..]].map(
+                    |assigned_limbs| {
+                        let ec_point = ec_point_from_assigned_limbs::<_, LIMBS, BITS>(
+                            assigned_limbs
+                                .iter()
+                                .map(|assigned| assigned.value())
+                                .collect::<Vec<_>>()
+                                .as_slice(),
+                        );
+                        loader.assign_ec_point(ec_point)
+                    },
+                );
+
+                for (src, dst) in assigned_limbs.iter().zip(
+                    iter::empty()
+                        .chain(lhs.assigned().x.truncation.limbs)
+                        .chain(lhs.assigned().y.truncation.limbs)
+                        .chain(rhs.assigned().x.truncation.limbs)
+                        .chain(rhs.assigned().y.truncation.limbs),
+                ) {
+                    loader
+                        .ctx_mut()
+                        .constrain_equal(src.cell(), dst.cell())
+                        .unwrap();
+                }
+                let accumulator = KzgAccumulator::new(lhs, rhs);
+
+                Ok(accumulator)
+            }
         }
     }
 }

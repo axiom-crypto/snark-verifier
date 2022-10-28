@@ -12,10 +12,7 @@ use crate::{
     },
     Error,
 };
-use halo2_proofs::{
-    circuit::{AssignedCell, Value},
-    transcript::EncodedChallenge,
-};
+use halo2_proofs::{circuit::Value, transcript::EncodedChallenge};
 use std::{
     io::{self, Read, Write},
     marker::PhantomData,
@@ -27,7 +24,7 @@ pub trait EncodeNative<'a, C: CurveAffine, N: FieldExt>: EccInstructions<'a, C> 
         &self,
         ctx: &mut Self::Context,
         ec_point: &Self::AssignedEcPoint,
-    ) -> Result<Vec<AssignedCell<N, N>>, Error>;
+    ) -> Result<Vec<Self::AssignedScalar>, Error>;
 }
 
 pub struct PoseidonTranscript<
@@ -49,7 +46,7 @@ impl<
         'a,
         C: CurveAffine,
         R: Read,
-        EccChip: EncodeNative<'a, C, C::Scalar, AssignedScalar = AssignedCell<C::Scalar, C::Scalar>>,
+        EccChip: EncodeNative<'a, C, C::Scalar>,
         const T: usize,
         const RATE: usize,
         const R_F: usize,
@@ -70,7 +67,7 @@ impl<
         'a,
         C: CurveAffine,
         R: Read,
-        EccChip: EncodeNative<'a, C, C::Scalar, AssignedScalar = AssignedCell<C::Scalar, C::Scalar>>,
+        EccChip: EncodeNative<'a, C, C::Scalar>,
         const T: usize,
         const RATE: usize,
         const R_F: usize,
@@ -112,7 +109,7 @@ impl<
         'a,
         C: CurveAffine,
         R: Read,
-        EccChip: EncodeNative<'a, C, C::Scalar, AssignedScalar = AssignedCell<C::Scalar, C::Scalar>>,
+        EccChip: EncodeNative<'a, C, C::Scalar>,
         const T: usize,
         const RATE: usize,
         const R_F: usize,
@@ -413,6 +410,22 @@ impl<
 
     fn finalize(self) -> W {
         self.finalize()
+    }
+}
+
+mod halo2_lib {
+    use crate::system::halo2::transcript::halo2::EncodeNative;
+    use halo2_curves::CurveAffine;
+    use halo2_ecc::ecc::BaseFieldEccChip;
+
+    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C> {
+        fn encode_native(
+            &self,
+            _: &mut Self::Context,
+            ec_point: &Self::AssignedEcPoint,
+        ) -> Result<Vec<Self::AssignedScalar>, crate::Error> {
+            Ok(vec![ec_point.x.native.clone(), ec_point.y.native.clone()])
+        }
     }
 }
 

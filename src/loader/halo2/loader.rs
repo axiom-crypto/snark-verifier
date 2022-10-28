@@ -61,7 +61,7 @@ impl<'a, C: CurveAffine, EccChip: EccInstructions<'a, C>> Halo2Loader<'a, C, Ecc
         self.ctx.borrow()
     }
 
-    pub(crate) fn ctx_mut(&self) -> RefMut<'_, EccChip::Context> {
+    pub fn ctx_mut(&self) -> RefMut<'_, EccChip::Context> {
         self.ctx.borrow_mut()
     }
 

@@ -138,17 +138,16 @@ mod halo2_lib {
     };
     use halo2_ecc::{
         bigint::CRTInteger,
-        ecc::{fixed::FixedEccPoint, EccChip, EccPoint},
-        fields::{fp::FpConfig, FieldChip},
+        ecc::{fixed::FixedEccPoint, BaseFieldEccChip, EccPoint},
+        fields::FieldChip,
     };
     use halo2_proofs::{
         circuit::{Cell, Value},
         plonk::Error,
     };
 
-    pub type BaseFieldChip<C> = FpConfig<<C as CurveAffine>::ScalarExt, <C as CurveAffine>::Base>;
-    pub type AssignedInteger<C> = CRTInteger<<C as CurveAffine>::ScalarExt>;
-    pub type AssignedEcPoint<C> = EccPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<C>>;
+    type AssignedInteger<C> = CRTInteger<<C as CurveAffine>::ScalarExt>;
+    type AssignedEcPoint<C> = EccPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<C>>;
 
     impl<'a, F: FieldExt> Context for halo2_base::Context<'a, F> {
         fn constrain_equal(&mut self, lhs: Cell, rhs: Cell) -> Result<(), Error> {
@@ -265,7 +264,7 @@ mod halo2_lib {
         }
     }
 
-    impl<'a, C: CurveAffine> EccInstructions<'a, C> for EccChip<'a, C::Scalar, BaseFieldChip<C>> {
+    impl<'a, 'b, C: CurveAffine> EccInstructions<'a, C> for BaseFieldEccChip<'b, C> {
         type Context = halo2_base::Context<'a, C::Scalar>;
         type ScalarChip = FlexGateConfig<C::Scalar>;
         type AssignedEcPoint = AssignedEcPoint<C>;
@@ -331,9 +330,9 @@ mod halo2_lib {
         fn normalize(
             &self,
             _: &mut Self::Context,
-            _: &Self::AssignedEcPoint,
+            point: &Self::AssignedEcPoint,
         ) -> Result<Self::AssignedEcPoint, Error> {
-            unreachable!()
+            Ok(point.clone())
         }
 
         fn assert_equal(
