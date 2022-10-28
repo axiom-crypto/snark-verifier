@@ -21,6 +21,8 @@ ethereum_types = { package = "ethereum-types", version = "0.13.1", default-featu
 sha3 = { version = "0.10.1", optional = true }
 
 # loader_halo2
+halo2_base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_base", default-features = false, optional = true }
+halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_ecc", default-features = false, optional = true }
 halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2022_10_22", package = "ecc", optional = true }
 poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", tag = "v2022_10_22", optional = true }
 
@@ -28,6 +30,7 @@ poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", t
 paste = "1.0.7"
 
 # system_halo2
+halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_ecc", default-features = false }
 halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2022_10_22", package = "ecc" }
 
 # loader_evm
@@ -39,7 +42,7 @@ tui = { version = "0.16.0", default-features = false, features = ["crossterm"] }
 default = ["loader_evm", "loader_halo2", "system_halo2"]
 
 loader_evm = ["dep:ethereum_types", "dep:sha3"]
-loader_halo2 = ["dep:halo2_proofs", "dep:halo2_wrong_ecc", "dep:poseidon"]
+loader_halo2 = ["dep:halo2_proofs", "dep:halo2_base", "halo2_ecc", "dep:halo2_wrong_ecc", "dep:poseidon"]
 
 system_halo2 = ["dep:halo2_proofs"]
 
