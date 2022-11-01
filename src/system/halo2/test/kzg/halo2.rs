@@ -303,15 +303,7 @@ impl Circuit<Fr> for Accumulation {
                     first_pass = false;
                     return Ok(());
                 }
-                let ctx = Context::new(
-                    region,
-                    ContextParams {
-                        num_advice: vec![(
-                            config.base_field_config.range.context_id.clone(),
-                            config.base_field_config.range.gate.num_advice,
-                        )],
-                    },
-                );
+                let ctx = config.base_field_config.new_context(region);
 
                 let loader = Halo2Loader::new(&config.base_field_config, ctx);
                 let KzgAccumulator { lhs, rhs } =

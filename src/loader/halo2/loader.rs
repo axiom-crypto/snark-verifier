@@ -159,11 +159,9 @@ where
         let assigned = self.ecc_chip.assign_point(&mut self.ctx_mut(), ec_point).unwrap();
         let is_on_curve_or_infinity =
             self.ecc_chip.is_on_curve_or_infinity::<C>(&mut self.ctx_mut(), &assigned).unwrap();
-        self.gate().assert_is_const(
-            &mut self.ctx_mut(),
-            &is_on_curve_or_infinity,
-            C::Scalar::one(),
-        );
+        self.gate()
+            .assert_is_const(&mut self.ctx_mut(), &is_on_curve_or_infinity, C::Scalar::one())
+            .unwrap();
 
         self.ec_point(assigned)
     }
@@ -335,7 +333,9 @@ where
                 let is_zero =
                     RangeInstructions::is_zero(self.range(), &mut self.ctx_mut(), assigned)
                         .unwrap();
-                self.gate().assert_is_const(&mut self.ctx_mut(), &is_zero, C::Scalar::zero());
+                self.gate()
+                    .assert_is_const(&mut self.ctx_mut(), &is_zero, C::Scalar::zero())
+                    .unwrap();
                 GateInstructions::div_unsafe(
                     self.gate(),
                     &mut self.ctx_mut(),
@@ -842,7 +842,7 @@ impl<'a, 'b, C: CurveAffine> ScalarLoader<C::Scalar> for Rc<Halo2Loader<'a, 'b, 
             Value::Assigned(assigned) => Existing(assigned),
         }));
         b.extend(values.iter().map(|(c, _)| Constant(*c)));
-        let (_, _, sum) = self.gate().inner_product(&mut self.ctx_mut(), &a, &b).unwrap();
+        let (_, _, sum) = self.gate().inner_product(&mut self.ctx_mut(), a, b).unwrap();
 
         self.scalar(Value::Assigned(sum))
     }
