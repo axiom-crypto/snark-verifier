@@ -53,10 +53,10 @@ use std::{
     rc::Rc,
 };
 
-pub const T: usize = 5;
-pub const RATE: usize = 4;
+pub const T: usize = 3;
+pub const RATE: usize = 2;
 pub const R_F: usize = 8;
-pub const R_P: usize = 60;
+pub const R_P: usize = 57;
 
 pub type Halo2Loader<'a, 'b> = loader::halo2::Halo2Loader<'a, 'b, G1Affine>;
 pub type PoseidonTranscript<L, S, B> =
