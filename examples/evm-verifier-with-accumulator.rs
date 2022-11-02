@@ -286,12 +286,12 @@ mod aggregation {
         let accumulators = snarks
             .iter()
             .flat_map(|snark| {
+                let protocol = snark.protocol.loaded(loader);
                 let instances = assign_instances(&snark.instances);
                 let mut transcript =
                     PoseidonTranscript::<Rc<Halo2Loader>, _>::new(loader, snark.proof());
-                let proof =
-                    Plonk::read_proof(svk, &snark.protocol, &instances, &mut transcript).unwrap();
-                Plonk::succinct_verify(svk, &snark.protocol, &instances, &proof).unwrap()
+                let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript).unwrap();
+                Plonk::succinct_verify(svk, &protocol, &instances, &proof).unwrap()
             })
             .collect_vec();
 
@@ -476,6 +476,7 @@ mod aggregation {
                                 config.base_field_config.range.context_id.clone(),
                                 config.base_field_config.range.gate.num_advice,
                             )],
+                            fixed_columns: config.base_field_config.range.gate.constants.clone(),
                         },
                     );
 
@@ -607,11 +608,12 @@ fn gen_aggregation_evm_verifier(
         vk,
         Config::kzg()
             .with_num_instance(num_instance.clone())
-            .with_accumulator_indices(accumulator_indices),
+            .with_accumulator_indices(Some(accumulator_indices)),
     );
 
     let loader = EvmLoader::new::<Fq, Fr>();
-    let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(loader.clone());
+    let protocol = protocol.loaded(&loader);
+    let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
     let instances = transcript.load_instances(num_instance);
     let proof = Plonk::read_proof(&svk, &protocol, &instances, &mut transcript).unwrap();

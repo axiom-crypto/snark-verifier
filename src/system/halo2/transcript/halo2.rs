@@ -1,11 +1,11 @@
 use crate::{
     loader::{
-        halo2::{self, EcPoint, EccInstructions, Halo2Loader, IntegerInstructions, Scalar},
+        halo2::{EcPoint, EccInstructions, Halo2Loader, IntegerInstructions, Scalar},
         native::{self, NativeLoader},
         Loader, ScalarLoader,
     },
     util::{
-        arithmetic::{fe_from_big, fe_to_big, CurveAffine, FieldExt, PrimeField},
+        arithmetic::{fe_to_fe, CurveAffine, FieldExt, PrimeField},
         hash::Poseidon,
         transcript::{Transcript, TranscriptRead, TranscriptWrite},
         Itertools,
@@ -54,10 +54,11 @@ impl<
     > PoseidonTranscript<C, Rc<Halo2Loader<'a, C, EccChip>>, Value<R>, T, RATE, R_F, R_P>
 {
     pub fn new(loader: &Rc<Halo2Loader<'a, C, EccChip>>, stream: Value<R>) -> Self {
+        let buf = Poseidon::new(loader, R_F, R_P);
         Self {
             loader: loader.clone(),
             stream,
-            buf: Poseidon::new(loader.clone(), R_F, R_P),
+            buf,
             _marker: PhantomData,
         }
     }
@@ -96,7 +97,7 @@ impl<
             .map(|encoded| {
                 encoded
                     .into_iter()
-                    .map(|encoded| self.loader.scalar(halo2::loader::Value::Assigned(encoded)))
+                    .map(|encoded| self.loader.scalar_from_assigned(encoded))
                     .collect_vec()
             })
             .map_err(|_| Error::Transcript(io::ErrorKind::Other, "".to_string()))?;
@@ -157,7 +158,7 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
         Self {
             loader: NativeLoader,
             stream,
-            buf: Poseidon::new(NativeLoader, R_F, R_P),
+            buf: Poseidon::new(&NativeLoader, R_F, R_P),
             _marker: PhantomData,
         }
     }
@@ -183,7 +184,8 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
         let encoded: Vec<_> = Option::from(ec_point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
-                .map(|fe| fe_from_big(fe_to_big(*fe)))
+                .cloned()
+                .map(fe_to_fe)
                 .collect_vec()
         }))
         .ok_or_else(|| {
@@ -418,7 +420,10 @@ mod halo2_lib {
     use halo2_curves::CurveAffine;
     use halo2_ecc::ecc::BaseFieldEccChip;
 
-    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C> {
+    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C>
+    where
+        for<'c, 'd> &'c C::CurveExt: std::ops::Add<&'d C::CurveExt, Output = C::CurveExt>,
+    {
         fn encode_native(
             &self,
             _: &mut Self::Context,
