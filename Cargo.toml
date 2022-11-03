@@ -57,3 +57,7 @@ required-features = ["loader_evm", "system_halo2"]
 [[example]]
 name = "evm-verifier-with-accumulator"
 required-features = ["loader_halo2", "loader_evm", "system_halo2"]
+
+[[example]]
+name = "recursion"
+required-features = ["loader_halo2", "system_halo2"]
