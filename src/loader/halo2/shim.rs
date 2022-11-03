@@ -271,10 +271,7 @@ mod halo2_lib {
         }
     }
 
-    impl<'a, 'b, C: CurveAffine> EccInstructions<'a, C> for BaseFieldEccChip<'b, C>
-    where
-        for<'c, 'd> &'c C::CurveExt: std::ops::Add<&'d C::CurveExt, Output = C::CurveExt>,
-    {
+    impl<'a, 'b, C: CurveAffine> EccInstructions<'a, C> for BaseFieldEccChip<'b, C> {
         type Context = halo2_base::Context<'a, C::Scalar>;
         type ScalarChip = FlexGateConfig<C::Scalar>;
         type AssignedEcPoint = AssignedEcPoint<C>;

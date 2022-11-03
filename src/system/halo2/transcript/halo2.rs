@@ -420,10 +420,7 @@ mod halo2_lib {
     use halo2_curves::CurveAffine;
     use halo2_ecc::ecc::BaseFieldEccChip;
 
-    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C>
-    where
-        for<'c, 'd> &'c C::CurveExt: std::ops::Add<&'d C::CurveExt, Output = C::CurveExt>,
-    {
+    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C> {
         fn encode_native(
             &self,
             _: &mut Self::Context,
