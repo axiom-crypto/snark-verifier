@@ -340,7 +340,8 @@ mod aggregation {
                 params.limb_bits,
                 params.num_limbs,
                 halo2_base::utils::modulus::<Fq>(),
-                "verifier".to_string(),
+                0,
+                params.degree,
             );
 
             let instance = meta.instance_column();
@@ -472,10 +473,8 @@ mod aggregation {
                     let ctx = Context::new(
                         region,
                         ContextParams {
-                            num_advice: vec![(
-                                config.base_field_config.range.context_id.clone(),
-                                config.base_field_config.range.gate.num_advice,
-                            )],
+                            max_rows: config.range().gate.max_rows,
+                            num_advice: vec![config.base_field_config.range.gate.num_advice],
                             fixed_columns: config.base_field_config.range.gate.constants.clone(),
                         },
                     );

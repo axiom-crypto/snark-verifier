@@ -222,13 +222,16 @@ mod halo2 {
     mod halo2_lib {
         use super::*;
         use halo2_base::AssignedValue;
-        use halo2_ecc::{bigint::CRTInteger, ecc::EccPoint};
+        use halo2_curves::BigPrimeField;
+        use halo2_ecc::{bigint::CRTInteger, ecc::EcPoint};
 
         impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
             AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS>
             for LimbsEncoding<LIMBS, BITS>
         where
             C: CurveAffine,
+            C::Scalar: BigPrimeField,
+            C::Base: BigPrimeField,
             PCS: PolynomialCommitmentScheme<
                 C,
                 Rc<Halo2Loader<'a, C, EccChip>>,
@@ -237,8 +240,8 @@ mod halo2 {
             EccChip: EccInstructions<
                 'a,
                 C,
-                AssignedEcPoint = EccPoint<C::Scalar, CRTInteger<C::Scalar>>,
-                AssignedScalar = AssignedValue<C::Scalar>,
+                AssignedEcPoint = EcPoint<C::Scalar, CRTInteger<'a, C::Scalar>>,
+                AssignedScalar = AssignedValue<'a, C::Scalar>,
             >,
         {
             fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {

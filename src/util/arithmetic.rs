@@ -15,7 +15,7 @@ pub use halo2_curves::{
         Curve, Group, GroupEncoding,
     },
     pairing::MillerLoopResult,
-    Coordinates, CurveAffine, CurveExt, FieldExt,
+    BigPrimeField, Coordinates, CurveAffine, CurveExt, FieldExt,
 };
 
 pub trait MultiMillerLoop: halo2_curves::pairing::MultiMillerLoop + Debug {}
@@ -128,8 +128,8 @@ impl<F: PrimeField> Domain<F> {
     pub fn rotate_scalar(&self, scalar: F, rotation: Rotation) -> F {
         match rotation.0.cmp(&0) {
             Ordering::Equal => scalar,
-            Ordering::Greater => scalar * self.gen.pow_vartime(&[rotation.0 as u64]),
-            Ordering::Less => scalar * self.gen_inv.pow_vartime(&[(-rotation.0) as u64]),
+            Ordering::Greater => scalar * self.gen.pow_vartime([rotation.0 as u64]),
+            Ordering::Less => scalar * self.gen_inv.pow_vartime([(-rotation.0) as u64]),
         }
     }
 }

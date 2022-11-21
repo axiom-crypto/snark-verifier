@@ -417,10 +417,14 @@ impl<
 
 mod halo2_lib {
     use crate::system::halo2::transcript::halo2::EncodeNative;
-    use halo2_curves::CurveAffine;
+    use halo2_curves::{BigPrimeField, CurveAffine};
     use halo2_ecc::ecc::BaseFieldEccChip;
 
-    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C> {
+    impl<'a, 'b, C: CurveAffine> EncodeNative<'a, C, C::Scalar> for BaseFieldEccChip<'b, C>
+    where
+        C::Scalar: BigPrimeField,
+        C::Base: BigPrimeField,
+    {
         fn encode_native(
             &self,
             _: &mut Self::Context,

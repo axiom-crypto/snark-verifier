@@ -38,10 +38,10 @@ impl<T: Debug> PartialEq for Value<T> {
 impl<T: Debug> Value<T> {
     fn identifier(&self) -> String {
         match &self {
-            Value::Constant(_) | Value::Memory(_) => format!("{:?}", self),
-            Value::Negated(value) => format!("-({:?})", value),
-            Value::Sum(lhs, rhs) => format!("({:?} + {:?})", lhs, rhs),
-            Value::Product(lhs, rhs) => format!("({:?} * {:?})", lhs, rhs),
+            Value::Constant(_) | Value::Memory(_) => format!("{self:?}"),
+            Value::Negated(value) => format!("-({value:?})"),
+            Value::Sum(lhs, rhs) => format!("({lhs:?} + {rhs:?})"),
+            Value::Product(lhs, rhs) => format!("({lhs:?} * {rhs:?})"),
         }
     }
 }

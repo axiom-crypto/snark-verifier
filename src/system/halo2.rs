@@ -137,11 +137,7 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
     let instance_committing_key = query_instance.then(|| {
         instance_committing_key(
             params,
-            polynomials
-                .num_instance()
-                .into_iter()
-                .max()
-                .unwrap_or_default(),
+            Iterator::max(polynomials.num_instance().into_iter()).unwrap_or_default(),
         )
     });
 
@@ -618,9 +614,9 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
                                 .iter()
                                 .zip(
                                     iter::successors(
-                                        Some(F::DELTA.pow_vartime(&[(i
-                                            * self.permutation_chunk_size)
-                                            as u64])),
+                                        Some(F::DELTA.pow_vartime([
+                                            (i * self.permutation_chunk_size) as u64,
+                                        ])),
                                         |delta| Some(F::DELTA * delta),
                                     )
                                     .map(Expression::Constant),

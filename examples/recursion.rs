@@ -45,12 +45,12 @@ use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::{fs, iter, marker::PhantomData, rc::Rc};
 
-const LIMBS: usize = 4;
-const BITS: usize = 68;
-const T: usize = 5;
-const RATE: usize = 4;
+const LIMBS: usize = 3;
+const BITS: usize = 88;
+const T: usize = 3;
+const RATE: usize = 2;
 const R_F: usize = 8;
-const R_P: usize = 60;
+const R_P: usize = 57;
 
 type Pcs = Kzg<Bn256, Gwc19>;
 type Svk = KzgSuccinctVerifyingKey<G1Affine>;
@@ -341,18 +341,13 @@ mod application {
 }
 
 mod recursion {
-    use super::*;
-    use halo2_wrong_ecc::{
-        integer::rns::Rns,
-        maingate::{
-            MainGate, MainGateConfig, MainGateInstructions, RangeChip, RangeConfig,
-            RangeInstructions, RegionCtx,
-        },
-        EccConfig,
-    };
+    use halo2_base::AssignedValue;
+    use halo2_ecc::ecc::EccChip;
 
-    type BaseFieldEccChip = halo2_wrong_ecc::BaseFieldEccChip<G1Affine, LIMBS, BITS>;
-    type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
+    use super::*;
+
+    type BaseFieldEccChip<'b> = halo2_ecc::ecc::BaseFieldEccChip<'b, G1Affine>;
+    type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip<'a>>;
 
     pub trait StateTransition {
         type Input;
@@ -366,9 +361,9 @@ mod recursion {
         svk: &Svk,
         loader: &Rc<Halo2Loader<'a>>,
         snark: &SnarkWitness,
-        expected_preprocessed_digest: Option<AssignedCell<Fr, Fr>>,
+        expected_preprocessed_digest: Option<AssignedValue<Fr>>,
     ) -> (
-        Vec<Vec<AssignedCell<Fr, Fr>>>,
+        Vec<Vec<AssignedValue<Fr>>>,
         Vec<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>>,
     ) {
         let protocol = if let Some(expected_preprocessed_digest) = expected_preprocessed_digest {
@@ -428,7 +423,7 @@ mod recursion {
 
     fn select_accumulator<'a>(
         loader: &Rc<Halo2Loader<'a>>,
-        condition: &AssignedCell<Fr, Fr>,
+        condition: &AssignedValue<Fr>,
         lhs: &KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
         rhs: &KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
     ) -> Result<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>, Error> {
@@ -438,7 +433,7 @@ mod recursion {
             .map(|(lhs, rhs)| {
                 loader
                     .ecc_chip()
-                    .select(&mut loader.ctx_mut(), condition, lhs, rhs)
+                    .select(&mut loader.ctx_mut(), lhs, rhs, condition)
             })
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
@@ -459,26 +454,64 @@ mod recursion {
         As::verify(&Default::default(), &accumulators, &proof).unwrap()
     }
 
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub struct AggregationConfigParams {
+        pub strategy: halo2_ecc::fields::fp::FpStrategy,
+        pub degree: u32,
+        pub num_advice: usize,
+        pub num_lookup_advice: usize,
+        pub num_fixed: usize,
+        pub lookup_bits: usize,
+        pub limb_bits: usize,
+        pub num_limbs: usize,
+    }
+
     #[derive(Clone)]
     pub struct RecursionConfig {
-        main_gate_config: MainGateConfig,
-        range_config: RangeConfig,
+        pub base_field_config: halo2_ecc::fields::fp::FpConfig<Fr, Fq>,
+        pub instance: Column<Instance>,
     }
 
     impl RecursionConfig {
-        pub fn main_gate(&self) -> MainGate<Fr> {
-            MainGate::new(self.main_gate_config.clone())
+        pub fn configure(meta: &mut ConstraintSystem<Fr>, params: AggregationConfigParams) -> Self {
+            assert!(
+                params.limb_bits == BITS && params.num_limbs == LIMBS,
+                "For now we fix limb_bits = {}, otherwise change code",
+                BITS
+            );
+            let base_field_config = halo2_ecc::fields::fp::FpConfig::configure(
+                meta,
+                params.strategy,
+                &[params.num_advice],
+                &[params.num_lookup_advice],
+                params.num_fixed,
+                params.lookup_bits,
+                params.limb_bits,
+                params.num_limbs,
+                halo2_base::utils::modulus::<Fq>(),
+                0,
+                params.degree,
+            );
+
+            let instance = meta.instance_column();
+            meta.enable_equality(instance);
+
+            Self {
+                base_field_config,
+                instance,
+            }
         }
 
-        pub fn range_chip(&self) -> RangeChip<Fr> {
-            RangeChip::new(self.range_config.clone())
+        pub fn gate(&self) -> &halo2_base::gates::flex_gate::FlexGateConfig<Fr> {
+            &self.base_field_config.range.gate
         }
 
-        pub fn ecc_chip(&self) -> BaseFieldEccChip {
-            BaseFieldEccChip::new(EccConfig::new(
-                self.range_config.clone(),
-                self.main_gate_config.clone(),
-            ))
+        pub fn range(&self) -> &halo2_base::gates::range::RangeConfig<Fr> {
+            &self.base_field_config.range
+        }
+
+        pub fn ecc_chip(&self) -> halo2_ecc::ecc::BaseFieldEccChip<'_, G1Affine> {
+            EccChip::construct(&self.base_field_config)
         }
     }
 
@@ -629,17 +662,14 @@ mod recursion {
         }
 
         fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            let main_gate_config = MainGate::<Fr>::configure(meta);
-            let range_config = RangeChip::<Fr>::configure(
-                meta,
-                &main_gate_config,
-                vec![BITS / LIMBS],
-                Rns::<Fq, Fr, LIMBS, BITS>::construct().overflow_lengths(),
-            );
-            RecursionConfig {
-                main_gate_config,
-                range_config,
-            }
+            let path = std::env::var("VERIFY_CONFIG")
+                .unwrap_or_else(|| "configs/verify_circuit.config".to_owned());
+            let params: AggregationConfigParams = serde_json::from_reader(
+                File::open(path.as_str()).expect(format!("{path} file should exist").as_str()),
+            )
+            .unwrap();
+
+            RecursionConfig::configure(meta, params)
         }
 
         fn synthesize(

@@ -134,18 +134,18 @@ pub trait EccInstructions<'a, C: CurveAffine>: Clone + Debug {
 mod halo2_lib {
     use crate::{
         loader::halo2::{Context, EccInstructions, IntegerInstructions},
-        util::arithmetic::{CurveAffine, Field, FieldExt, PrimeField},
+        util::arithmetic::{CurveAffine, Field, PrimeField},
     };
     use halo2_base::{
         self,
         gates::{flex_gate::FlexGateConfig, GateInstructions, RangeInstructions},
         AssignedValue,
-        QuantumCell::{Constant, Existing},
+        QuantumCell::{Constant, Existing, Witness},
     };
-    use halo2_curves::group::prime::PrimeCurveAffine;
+    use halo2_curves::BigPrimeField;
     use halo2_ecc::{
         bigint::CRTInteger,
-        ecc::{fixed::FixedEccPoint, BaseFieldEccChip, EccPoint},
+        ecc::{fixed::FixedEcPoint, BaseFieldEccChip, EcPoint},
         fields::FieldChip,
     };
     use halo2_proofs::{
@@ -153,24 +153,23 @@ mod halo2_lib {
         plonk::Error,
     };
 
-    type AssignedInteger<C> = CRTInteger<<C as CurveAffine>::ScalarExt>;
-    type AssignedEcPoint<C> = EccPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<C>>;
+    type AssignedInteger<'v, C> = CRTInteger<'v, <C as CurveAffine>::ScalarExt>;
+    type AssignedEcPoint<'v, C> = EcPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<'v, C>>;
 
-    impl<'a, F: FieldExt> Context for halo2_base::Context<'a, F> {
+    impl<'a, F: BigPrimeField> Context for halo2_base::Context<'a, F> {
         fn constrain_equal(&mut self, lhs: Cell, rhs: Cell) -> Result<(), Error> {
             self.region.constrain_equal(lhs, rhs)
         }
 
         fn offset(&self) -> usize {
-            dbg!("using context offset");
-            *self.advice_rows.values().flatten().max().unwrap()
+            unreachable!()
         }
     }
 
-    impl<'a, F: FieldExt> IntegerInstructions<'a, F> for FlexGateConfig<F> {
+    impl<'a, F: BigPrimeField> IntegerInstructions<'a, F> for FlexGateConfig<F> {
         type Context = halo2_base::Context<'a, F>;
         type Integer = F;
-        type AssignedInteger = AssignedValue<F>;
+        type AssignedInteger = AssignedValue<'a, F>;
 
         fn integer(&self, scalar: F) -> Self::Integer {
             scalar
@@ -181,7 +180,7 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             integer: Value<Self::Integer>,
         ) -> Result<Self::AssignedInteger, Error> {
-            Ok(self.assign_witnesses(ctx, vec![integer])?.pop().unwrap())
+            Ok(self.assign_region_last(ctx, vec![Witness(integer)], vec![]))
         }
 
         fn assign_constant(
@@ -189,10 +188,7 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             integer: F,
         ) -> Result<Self::AssignedInteger, Error> {
-            Ok(self
-                .assign_region(ctx, vec![Constant(integer)], vec![], None)?
-                .pop()
-                .unwrap())
+            Ok(self.assign_region_last(ctx, vec![Constant(integer)], vec![]))
         }
 
         fn sum_with_coeff_and_const(
@@ -209,8 +205,7 @@ mod halo2_lib {
             }
             a.extend(values.iter().map(|(_, a)| Existing(a)));
             b.extend(values.iter().map(|(c, _)| Constant(*c)));
-            let (_, _, sum) = self.inner_product(ctx, a, b)?;
-            Ok(sum)
+            Ok(self.inner_product(ctx, a, b))
         }
 
         fn sum_products_with_coeff_and_const(
@@ -221,15 +216,13 @@ mod halo2_lib {
         ) -> Result<Self::AssignedInteger, Error> {
             match values.len() {
                 0 => self.assign_constant(ctx, constant),
-                _ => {
-                    let mut prods = Vec::with_capacity(values.len());
-                    for (c, a, b) in values.into_iter() {
-                        let a = Existing(&a);
-                        let b = Existing(&b);
-                        prods.push((*c, a, b));
-                    }
-                    self.sum_products_with_coeff_and_var(ctx, &prods, &Constant(constant))
-                }
+                _ => Ok(self.sum_products_with_coeff_and_var(
+                    ctx,
+                    values
+                        .iter()
+                        .map(|(c, a, b)| (*c, Existing(a), Existing(b))),
+                    Constant(constant),
+                )),
             }
         }
 
@@ -239,7 +232,7 @@ mod halo2_lib {
             a: &Self::AssignedInteger,
             b: &Self::AssignedInteger,
         ) -> Result<Self::AssignedInteger, Error> {
-            GateInstructions::sub(self, ctx, &Existing(a), &Existing(b))
+            Ok(GateInstructions::sub(self, ctx, Existing(a), Existing(b)))
         }
 
         fn neg(
@@ -247,7 +240,7 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             a: &Self::AssignedInteger,
         ) -> Result<Self::AssignedInteger, Error> {
-            GateInstructions::neg(self, ctx, &Existing(a))
+            Ok(GateInstructions::neg(self, ctx, Existing(a)))
         }
 
         fn invert(
@@ -256,9 +249,14 @@ mod halo2_lib {
             a: &Self::AssignedInteger,
         ) -> Result<Self::AssignedInteger, Error> {
             // make sure scalar != 0
-            let is_zero = self.is_zero(ctx, a)?;
-            self.assert_is_const(ctx, &is_zero, F::zero())?;
-            GateInstructions::div_unsafe(self, ctx, &Constant(F::one()), &Existing(a))
+            let is_zero = self.is_zero(ctx, a);
+            self.assert_is_const(ctx, &is_zero, F::zero());
+            Ok(GateInstructions::div_unsafe(
+                self,
+                ctx,
+                Constant(F::one()),
+                Existing(a),
+            ))
         }
 
         fn assert_equal(
@@ -271,12 +269,16 @@ mod halo2_lib {
         }
     }
 
-    impl<'a, 'b, C: CurveAffine> EccInstructions<'a, C> for BaseFieldEccChip<'b, C> {
+    impl<'a, 'b, C: CurveAffine> EccInstructions<'a, C> for BaseFieldEccChip<'b, C>
+    where
+        C::Scalar: BigPrimeField,
+        C::Base: BigPrimeField,
+    {
         type Context = halo2_base::Context<'a, C::Scalar>;
         type ScalarChip = FlexGateConfig<C::Scalar>;
-        type AssignedEcPoint = AssignedEcPoint<C>;
+        type AssignedEcPoint = AssignedEcPoint<'a, C>;
         type Scalar = C::Scalar;
-        type AssignedScalar = AssignedValue<C::Scalar>;
+        type AssignedScalar = AssignedValue<'a, C::Scalar>;
 
         fn scalar_chip(&self) -> &Self::ScalarChip {
             self.field_chip.range().gate()
@@ -287,12 +289,12 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             point: C,
         ) -> Result<Self::AssignedEcPoint, Error> {
-            let fixed = FixedEccPoint::<C::Scalar, C>::from_g1(
+            let fixed = FixedEcPoint::<C::Scalar, C>::from_g1(
                 &point,
                 self.field_chip.num_limbs,
                 self.field_chip.limb_bits,
             );
-            FixedEccPoint::assign(fixed, self.field_chip, ctx)
+            Ok(FixedEcPoint::assign(fixed, self.field_chip, ctx))
         }
 
         fn assign_point(
@@ -300,13 +302,13 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             point: Value<C>,
         ) -> Result<Self::AssignedEcPoint, Error> {
-            let assigned = self.assign_point(ctx, point)?;
-            let is_on_curve_or_infinity = self.is_on_curve_or_infinity::<C>(ctx, &assigned)?;
+            let assigned = self.assign_point(ctx, point);
+            let is_on_curve_or_infinity = self.is_on_curve_or_infinity::<C>(ctx, &assigned);
             self.field_chip.range.gate.assert_is_const(
                 ctx,
                 &is_on_curve_or_infinity,
                 C::Scalar::one(),
-            )?;
+            );
             Ok(assigned)
         }
 
@@ -316,12 +318,13 @@ mod halo2_lib {
             values: &[Self::AssignedEcPoint],
             constant: C,
         ) -> Result<Self::AssignedEcPoint, Error> {
-            if bool::from(constant.is_identity()) {
-                self.sum::<C>(ctx, values.iter())
+            let constant = if bool::from(constant.is_identity()) {
+                None
             } else {
-                let constant = EccInstructions::<C>::assign_constant(self, ctx, constant)?;
-                self.sum::<C>(ctx, values.iter().chain([constant].iter()).into_iter())
-            }
+                let constant = EccInstructions::<C>::assign_constant(self, ctx, constant).unwrap();
+                Some(constant)
+            };
+            Ok(self.sum::<C>(ctx, constant.iter().chain(values.iter())))
         }
 
         fn variable_base_msm(
@@ -330,13 +333,13 @@ mod halo2_lib {
             pairs: &[(Self::AssignedScalar, Self::AssignedEcPoint)],
         ) -> Result<Self::AssignedEcPoint, Error> {
             let (scalars, points): (Vec<_>, Vec<_>) = pairs.iter().cloned().unzip();
-            self.multi_scalar_mult::<C>(
+            Ok(self.multi_scalar_mult::<C>(
                 ctx,
                 &points,
                 &scalars.into_iter().map(|scalar| vec![scalar]).collect(),
                 <C::Scalar as PrimeField>::NUM_BITS as usize,
                 4, // empirically clump factor of 4 seems to be best
-            )
+            ))
         }
 
         fn fixed_base_msm(
@@ -345,15 +348,15 @@ mod halo2_lib {
             pairs: &[(Self::AssignedScalar, C)],
         ) -> Result<Self::AssignedEcPoint, Error> {
             let (scalars, points): (Vec<_>, Vec<_>) = pairs.iter().cloned().unzip();
-            BaseFieldEccChip::<C>::fixed_base_msm::<C>(
-                &self,
+            Ok(BaseFieldEccChip::<C>::fixed_base_msm::<C>(
+                self,
                 ctx,
                 &points,
                 &scalars.into_iter().map(|scalar| vec![scalar]).collect(),
                 <C::Scalar as PrimeField>::NUM_BITS as usize,
                 0,
                 4,
-            )
+            ))
         }
 
         fn normalize(
@@ -370,7 +373,8 @@ mod halo2_lib {
             a: &Self::AssignedEcPoint,
             b: &Self::AssignedEcPoint,
         ) -> Result<(), Error> {
-            self.assert_equal(ctx, a, b)
+            self.assert_equal(ctx, a, b);
+            Ok(())
         }
     }
 }

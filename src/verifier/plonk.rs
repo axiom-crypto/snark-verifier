@@ -451,11 +451,8 @@ where
                 (min, max)
             }
         });
-        let max_instance_len = instances
-            .iter()
-            .map(|instance| instance.len())
-            .max()
-            .unwrap_or_default();
+        let max_instance_len =
+            Iterator::max(instances.iter().map(|instance| instance.len())).unwrap_or_default();
         -max_rotation..max_instance_len as i32 + min_rotation.abs()
     });
     protocol
