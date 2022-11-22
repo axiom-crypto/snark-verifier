@@ -1,5 +1,5 @@
+use ark_std::{end_timer, start_timer};
 use ethereum_types::Address;
-use foundry_evm::executor::{fork::MultiFork, Backend, ExecutorBuilder};
 use halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_proofs::{
     dev::MockProver,
@@ -18,7 +18,7 @@ use halo2_proofs::{
 use itertools::Itertools;
 use plonk_verifier::{
     loader::{
-        evm::{encode_calldata, EvmLoader},
+        evm::{encode_calldata, EvmLoader, ExecutorBuilder},
         native::NativeLoader,
     },
     pcs::kzg::{Gwc19, Kzg, KzgAs, LimbsEncoding},
@@ -140,7 +140,7 @@ mod application {
                     region.assign_advice(|| "", config.a, 0, || Value::known(self.0))?;
                     region.assign_fixed(|| "", config.q_a, 0, || Value::known(-Fr::one()))?;
 
-                    region.assign_advice(|| "", config.a, 1, || Value::known(-Fr::from(5)))?;
+                    region.assign_advice(|| "", config.a, 1, || Value::known(-Fr::from(5u64)))?;
                     for (idx, column) in (1..).zip([
                         config.q_a,
                         config.q_b,
@@ -148,7 +148,12 @@ mod application {
                         config.q_ab,
                         config.constant,
                     ]) {
-                        region.assign_fixed(|| "", column, 1, || Value::known(Fr::from(idx)))?;
+                        region.assign_fixed(
+                            || "",
+                            column,
+                            1,
+                            || Value::known(Fr::from(idx as u64)),
+                        )?;
                     }
 
                     let a = region.assign_advice(|| "", config.a, 2, || Value::known(Fr::one()))?;
@@ -164,7 +169,8 @@ mod application {
 
 mod aggregation {
     use super::{As, Plonk, BITS, LIMBS};
-    use halo2_base::{AssignedValue, Context, ContextParams};
+    use ark_std::{end_timer, start_timer};
+    use halo2_base::{Context, ContextParams};
     use halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};
     use halo2_ecc::ecc::EccChip;
     use halo2_proofs::{
@@ -190,12 +196,12 @@ mod aggregation {
             AccumulationScheme, AccumulationSchemeProver,
         },
         system,
-        util::arithmetic::{fe_to_limbs, FieldExt},
+        util::arithmetic::fe_to_limbs,
         verifier::PlonkVerifier,
         Protocol,
     };
     use rand::rngs::OsRng;
-    use std::{fs::File, iter, rc::Rc};
+    use std::{fs::File, rc::Rc};
 
     const T: usize = 5;
     const RATE: usize = 4;
@@ -203,10 +209,9 @@ mod aggregation {
     const R_P: usize = 60;
 
     type Svk = KzgSuccinctVerifyingKey<G1Affine>;
-    type BaseFieldEccChip<'b> = halo2_ecc::ecc::BaseFieldEccChip<'b, G1Affine>;
-    type Halo2Loader<'a, 'b> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip<'b>>;
+    type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
+    type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
     // type BaseFieldEccChip = halo2_wrong_ecc::BaseFieldEccChip<G1Affine, LIMBS, BITS>;
-    // type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
     pub type PoseidonTranscript<L, S> =
         system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 
@@ -265,12 +270,12 @@ mod aggregation {
         }
     }
 
-    pub fn aggregate<'a, 'b>(
+    pub fn aggregate<'a>(
         svk: &Svk,
-        loader: &Rc<Halo2Loader<'a, 'b>>,
+        loader: &Rc<Halo2Loader<'a>>,
         snarks: &[SnarkWitness],
         as_proof: Value<&'_ [u8]>,
-    ) -> KzgAccumulator<G1Affine, Rc<Halo2Loader<'a, 'b>>> {
+    ) -> KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>> {
         let assign_instances = |instances: &[Vec<Value<Fr>>]| {
             instances
                 .iter()
@@ -341,7 +346,7 @@ mod aggregation {
                 params.num_limbs,
                 halo2_base::utils::modulus::<Fq>(),
                 0,
-                params.degree,
+                params.degree as usize,
             );
 
             let instance = meta.instance_column();
@@ -357,8 +362,8 @@ mod aggregation {
             &self.base_field_config.range
         }
 
-        pub fn ecc_chip(&self) -> halo2_ecc::ecc::BaseFieldEccChip<'_, G1Affine> {
-            EccChip::construct(&self.base_field_config)
+        pub fn ecc_chip(&self) -> halo2_ecc::ecc::BaseFieldEccChip<G1Affine> {
+            EccChip::construct(self.base_field_config.clone())
         }
     }
 
@@ -443,10 +448,10 @@ mod aggregation {
         }
 
         fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            let path =
-                std::env::var("VERIFY_CONFIG").expect("export VERIFY_CONFIG with config path");
+            let path = std::env::var("VERIFY_CONFIG")
+                .unwrap_or_else(|_| "configs/verify_circuit.config".to_owned());
             let params: AggregationConfigParams = serde_json::from_reader(
-                File::open(path.as_str()).expect(format!("{} file should exist", path).as_str()),
+                File::open(path.as_str()).unwrap_or_else(|err| panic!("{err:?}")),
             )
             .unwrap();
 
@@ -459,9 +464,9 @@ mod aggregation {
             mut layouter: impl Layouter<Fr>,
         ) -> Result<(), plonk::Error> {
             config.range().load_lookup_table(&mut layouter)?;
+            let max_rows = config.range().gate.max_rows;
 
-            // Need to trick layouter to skip first pass in get shape mode
-            let mut first_pass = true; // assume using simple floor planner
+            let mut first_pass = halo2_base::SKIP_FIRST_PASS; // assume using simple floor planner
             let mut assigned_instances: Option<Vec<Cell>> = None;
             layouter.assign_region(
                 || "",
@@ -470,10 +475,11 @@ mod aggregation {
                         first_pass = false;
                         return Ok(());
                     }
+                    let witness_time = start_timer!(|| "Witness Collection");
                     let ctx = Context::new(
                         region,
                         ContextParams {
-                            max_rows: config.range().gate.max_rows,
+                            max_rows,
                             num_advice: vec![config.base_field_config.range.gate.num_advice],
                             fixed_columns: config.base_field_config.range.gate.constants.clone(),
                         },
@@ -487,7 +493,7 @@ mod aggregation {
                     let lhs = lhs.assigned();
                     let rhs = rhs.assigned();
 
-                    config.base_field_config.finalize(&mut loader.ctx_mut())?;
+                    config.base_field_config.finalize(&mut loader.ctx_mut());
 
                     let instances: Vec<_> = lhs
                         .x
@@ -500,23 +506,20 @@ mod aggregation {
                         .map(|assigned| assigned.cell())
                         .collect();
                     assigned_instances = Some(instances);
+                    end_timer!(witness_time);
                     Ok(())
                 },
             )?;
 
-            Ok({
-                // TODO: use less instances by following Scroll's strategy of keeping only last bit of y coordinate
-                let mut layouter = layouter.namespace(|| "expose");
-                for (i, cell) in assigned_instances.unwrap().into_iter().enumerate() {
-                    layouter.constrain_instance(cell, config.instance, i)?;
-                }
-            })
+            // Expose instances
+            // TODO: use less instances by following Scroll's strategy of keeping only last bit of y coordinate
+            let mut layouter = layouter.namespace(|| "expose");
+            for (i, cell) in assigned_instances.unwrap().into_iter().enumerate() {
+                layouter.constrain_instance(cell, config.instance, i)?;
+            }
+            Ok(())
         }
     }
-}
-
-fn gen_srs(k: u32) -> ParamsKZG<Bn256> {
-    ParamsKZG::<Bn256>::setup(k, OsRng)
 }
 
 fn gen_pk<C: Circuit<Fr>>(params: &ParamsKZG<Bn256>, circuit: &C) -> ProvingKey<G1Affine> {
@@ -543,6 +546,8 @@ fn gen_proof<
         .iter()
         .map(|instances| instances.as_slice())
         .collect_vec();
+
+    let proof_time = start_timer!(|| "Create proof");
     let proof = {
         let mut transcript = TW::init(Vec::new());
         create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<_>, _, _, TW, _>(
@@ -556,6 +561,7 @@ fn gen_proof<
         .unwrap();
         transcript.finalize()
     };
+    end_timer!(proof_time);
 
     let accept = {
         let mut transcript = TR::init(Cursor::new(proof.clone()));
@@ -626,16 +632,14 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
     let success = {
         let mut evm = ExecutorBuilder::default()
             .with_gas_limit(u64::MAX.into())
-            .build(Backend::new(MultiFork::new().0, None));
+            .build();
 
         let caller = Address::from_low_u64_be(0xfe);
         let verifier = evm
-            .deploy(caller, deployment_code.into(), 0.into(), None)
-            .unwrap()
-            .address;
-        let result = evm
-            .call_raw(caller, verifier, calldata.into(), 0.into())
+            .deploy(caller, deployment_code.into(), 0.into())
+            .address
             .unwrap();
+        let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
 
         dbg!(result.gas_used);
 
@@ -646,7 +650,7 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 
 fn main() {
     std::env::set_var("VERIFY_CONFIG", "./configs/verify_circuit.config");
-    let params = gen_srs(21);
+    let params = halo2_base::utils::fs::gen_srs(21);
     let params_app = {
         let mut params = params.clone();
         params.downsize(8);

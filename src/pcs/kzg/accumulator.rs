@@ -53,13 +53,22 @@ mod native {
             Accumulator = KzgAccumulator<C, NativeLoader>,
         >,
     {
-        fn from_repr(limbs: Vec<C::Scalar>) -> Result<PCS::Accumulator, Error> {
+        fn from_repr(limbs: &[&C::Scalar]) -> Result<PCS::Accumulator, Error> {
             assert_eq!(limbs.len(), 4 * LIMBS);
 
             let [lhs_x, lhs_y, rhs_x, rhs_y]: [_; 4] = limbs
                 .chunks(LIMBS)
                 .into_iter()
-                .map(|limbs| fe_from_limbs::<_, _, LIMBS, BITS>(limbs.try_into().unwrap()))
+                .map(|limbs| {
+                    fe_from_limbs::<_, _, LIMBS, BITS>(
+                        limbs
+                            .iter()
+                            .map(|limb| **limb)
+                            .collect_vec()
+                            .try_into()
+                            .unwrap(),
+                    )
+                })
                 .collect_vec()
                 .try_into()
                 .unwrap();
@@ -100,7 +109,7 @@ mod evm {
             Accumulator = KzgAccumulator<C, Rc<EvmLoader>>,
         >,
     {
-        fn from_repr(limbs: Vec<Scalar>) -> Result<PCS::Accumulator, Error> {
+        fn from_repr(limbs: &[&Scalar]) -> Result<PCS::Accumulator, Error> {
             assert_eq!(limbs.len(), 4 * LIMBS);
 
             let loader = limbs[0].loader();
@@ -123,9 +132,12 @@ mod evm {
 }
 
 #[cfg(feature = "loader_halo2")]
+pub use halo2::LimbsEncodingInstructions;
+
+#[cfg(feature = "loader_halo2")]
 mod halo2 {
     use crate::{
-        loader::halo2::{Context, EccInstructions, Halo2Loader, Scalar, Valuetools},
+        loader::halo2::{EccInstructions, Halo2Loader, Scalar, Valuetools},
         pcs::{
             kzg::{KzgAccumulator, LimbsEncoding},
             AccumulatorEncoding, PolynomialCommitmentScheme,
@@ -136,10 +148,10 @@ mod halo2 {
         },
         Error,
     };
-    use halo2_proofs::circuit::Value;
-    use std::{iter, rc::Rc};
+    use halo2_proofs::{circuit::Value, plonk};
+    use std::{iter, ops::Deref, rc::Rc};
 
-    fn ec_point_from_assigned_limbs<C: CurveAffine, const LIMBS: usize, const BITS: usize>(
+    fn ec_point_from_limbs<C: CurveAffine, const LIMBS: usize, const BITS: usize>(
         limbs: &[Value<&C::Scalar>],
     ) -> Value<C> {
         assert_eq!(limbs.len(), 2 * LIMBS);
@@ -147,9 +159,9 @@ mod halo2 {
         let [x, y] = [&limbs[..LIMBS], &limbs[LIMBS..]].map(|limbs| {
             limbs
                 .iter()
-                .map(|limb| limb.map(|x| *x))
+                .cloned()
                 .fold_zipped(Vec::new(), |mut acc, limb| {
-                    acc.push(limb);
+                    acc.push(*limb);
                     acc
                 })
                 .map(|limbs| fe_from_limbs::<_, _, LIMBS, BITS>(limbs.try_into().unwrap()))
@@ -158,126 +170,149 @@ mod halo2 {
         x.zip(y).map(|(x, y)| C::from_xy(x, y).unwrap())
     }
 
-    /*
-    mod halo2_wrong {
-        use super::*;
-        use halo2_wrong_ecc::{maingate::AssignedValue, AssignedPoint};
+    pub trait LimbsEncodingInstructions<'a, C: CurveAffine, const LIMBS: usize, const BITS: usize>:
+        EccInstructions<'a, C>
+    {
+        fn assign_ec_point_from_limbs(
+            &self,
+            ctx: &mut Self::Context,
+            limbs: &[impl Deref<Target = Self::AssignedScalar>],
+        ) -> Result<Self::AssignedEcPoint, plonk::Error>;
 
-        impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
-            AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS>
-            for LimbsEncoding<LIMBS, BITS>
-        where
-            C: CurveAffine,
-            PCS: PolynomialCommitmentScheme<
-                C,
-                Rc<Halo2Loader<'a, C, EccChip>>,
-                Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
-            >,
-            EccChip: EccInstructions<
-                'a,
-                C,
-                AssignedEcPoint = AssignedPoint<<C as CurveAffine>::Base, C::Scalar, LIMBS, BITS>,
-                AssignedScalar = AssignedValue<C::Scalar>,
-            >,
-        {
-            fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {
-                assert_eq!(limbs.len(), 4 * LIMBS);
+        fn assign_ec_point_to_limbs(
+            &self,
+            ctx: &mut Self::Context,
+            ec_point: impl Deref<Target = Self::AssignedEcPoint>,
+        ) -> Result<Vec<Self::AssignedCell>, plonk::Error>;
+    }
 
-                let loader = limbs[0].loader();
+    impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
+        AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS> for LimbsEncoding<LIMBS, BITS>
+    where
+        C: CurveAffine,
+        PCS: PolynomialCommitmentScheme<
+            C,
+            Rc<Halo2Loader<'a, C, EccChip>>,
+            Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
+        >,
+        EccChip: LimbsEncodingInstructions<'a, C, LIMBS, BITS>,
+    {
+        fn from_repr(limbs: &[&Scalar<'a, C, EccChip>]) -> Result<PCS::Accumulator, Error> {
+            assert_eq!(limbs.len(), 4 * LIMBS);
 
-                let assigned_limbs = limbs.iter().map(|limb| limb.assigned()).collect_vec();
-                let [lhs, rhs] = [&assigned_limbs[..2 * LIMBS], &assigned_limbs[2 * LIMBS..]].map(
-                    |assigned_limbs| {
-                        let ec_point = ec_point_from_assigned_limbs::<_, LIMBS, BITS>(
-                            assigned_limbs
-                                .iter()
-                                .map(|assigned| assigned.value())
-                                .collect()
-                                .as_slice(),
-                        );
-                        loader.assign_ec_point(ec_point)
-                    },
-                );
+            let loader = limbs[0].loader();
 
-                for (src, dst) in assigned_limbs.iter().zip(
-                    iter::empty()
-                        .chain(lhs.assigned().x().limbs())
-                        .chain(lhs.assigned().y().limbs())
-                        .chain(rhs.assigned().x().limbs())
-                        .chain(rhs.assigned().y().limbs()),
-                ) {
-                    loader
-                        .ctx_mut()
-                        .constrain_equal(src.cell(), dst.as_ref().cell())
-                        .unwrap();
-                }
-                let accumulator = KzgAccumulator::new(lhs, rhs);
+            let [lhs, rhs] = [&limbs[..2 * LIMBS], &limbs[2 * LIMBS..]].map(|limbs| {
+                let assigned = loader
+                    .ecc_chip()
+                    .assign_ec_point_from_limbs(
+                        &mut loader.ctx_mut(),
+                        &limbs.iter().map(|limb| limb.assigned()).collect_vec(),
+                    )
+                    .unwrap();
+                loader.ec_point_from_assigned(assigned)
+            });
 
-                Ok(accumulator)
-            }
+            Ok(KzgAccumulator::new(lhs, rhs))
         }
     }
-    */
 
     mod halo2_lib {
         use super::*;
-        use halo2_base::AssignedValue;
         use halo2_curves::BigPrimeField;
-        use halo2_ecc::{bigint::CRTInteger, ecc::EcPoint};
+        use halo2_ecc::ecc::BaseFieldEccChip;
 
-        impl<'a, C, PCS, EccChip, const LIMBS: usize, const BITS: usize>
-            AccumulatorEncoding<C, Rc<Halo2Loader<'a, C, EccChip>>, PCS>
-            for LimbsEncoding<LIMBS, BITS>
+        impl<'a, C, const LIMBS: usize, const BITS: usize>
+            LimbsEncodingInstructions<'a, C, LIMBS, BITS> for BaseFieldEccChip<C>
         where
             C: CurveAffine,
-            C::Scalar: BigPrimeField,
+            C::ScalarExt: BigPrimeField,
             C::Base: BigPrimeField,
-            PCS: PolynomialCommitmentScheme<
-                C,
-                Rc<Halo2Loader<'a, C, EccChip>>,
-                Accumulator = KzgAccumulator<C, Rc<Halo2Loader<'a, C, EccChip>>>,
-            >,
-            EccChip: EccInstructions<
-                'a,
-                C,
-                AssignedEcPoint = EcPoint<C::Scalar, CRTInteger<'a, C::Scalar>>,
-                AssignedScalar = AssignedValue<'a, C::Scalar>,
-            >,
         {
-            fn from_repr(limbs: Vec<Scalar<'a, C, EccChip>>) -> Result<PCS::Accumulator, Error> {
-                assert_eq!(limbs.len(), 4 * LIMBS);
+            fn assign_ec_point_from_limbs(
+                &self,
+                ctx: &mut Self::Context,
+                limbs: &[impl Deref<Target = Self::AssignedScalar>],
+            ) -> Result<Self::AssignedEcPoint, plonk::Error> {
+                assert_eq!(limbs.len(), 2 * LIMBS);
 
-                let loader = limbs[0].loader();
-
-                let assigned_limbs = limbs.iter().map(|limb| limb.assigned()).collect_vec();
-                let [lhs, rhs] = [&assigned_limbs[..2 * LIMBS], &assigned_limbs[2 * LIMBS..]].map(
-                    |assigned_limbs| {
-                        let ec_point = ec_point_from_assigned_limbs::<_, LIMBS, BITS>(
-                            assigned_limbs
-                                .iter()
-                                .map(|assigned| assigned.value())
-                                .collect::<Vec<_>>()
-                                .as_slice(),
-                        );
-                        loader.assign_ec_point(ec_point)
-                    },
+                let ec_point = self.assign_point::<C>(
+                    ctx,
+                    ec_point_from_limbs::<_, LIMBS, BITS>(
+                        &limbs.iter().map(|limb| limb.value()).collect_vec(),
+                    ),
                 );
 
-                for (src, dst) in assigned_limbs.iter().zip(
+                for (src, dst) in limbs.iter().zip_eq(
                     iter::empty()
-                        .chain(lhs.assigned().x.truncation.limbs)
-                        .chain(lhs.assigned().y.truncation.limbs)
-                        .chain(rhs.assigned().x.truncation.limbs)
-                        .chain(rhs.assigned().y.truncation.limbs),
+                        .chain(ec_point.x().limbs())
+                        .chain(ec_point.y().limbs()),
                 ) {
-                    loader
-                        .ctx_mut()
+                    ctx.region
                         .constrain_equal(src.cell(), dst.cell())
-                        .unwrap();
+                        .expect("constrain equal should not fail");
                 }
-                let accumulator = KzgAccumulator::new(lhs, rhs);
 
-                Ok(accumulator)
+                Ok(ec_point)
+            }
+
+            fn assign_ec_point_to_limbs(
+                &self,
+                _: &mut Self::Context,
+                ec_point: impl Deref<Target = Self::AssignedEcPoint>,
+            ) -> Result<Vec<Self::AssignedCell>, plonk::Error> {
+                Ok(iter::empty()
+                    .chain(ec_point.x().limbs())
+                    .chain(ec_point.y().limbs())
+                    .cloned()
+                    .collect())
+            }
+        }
+    }
+
+    mod halo2_wrong {
+        use super::*;
+        use halo2_wrong_ecc::BaseFieldEccChip;
+
+        impl<'a, C: CurveAffine, const LIMBS: usize, const BITS: usize>
+            LimbsEncodingInstructions<'a, C, LIMBS, BITS> for BaseFieldEccChip<C, LIMBS, BITS>
+        {
+            fn assign_ec_point_from_limbs(
+                &self,
+                ctx: &mut Self::Context,
+                limbs: &[impl Deref<Target = Self::AssignedScalar>],
+            ) -> Result<Self::AssignedEcPoint, plonk::Error> {
+                assert_eq!(limbs.len(), 2 * LIMBS);
+
+                let ec_point = self.assign_point(
+                    ctx,
+                    ec_point_from_limbs::<_, LIMBS, BITS>(
+                        &limbs.iter().map(|limb| limb.value()).collect_vec(),
+                    ),
+                )?;
+
+                for (src, dst) in limbs.iter().zip_eq(
+                    iter::empty()
+                        .chain(ec_point.x().limbs())
+                        .chain(ec_point.y().limbs()),
+                ) {
+                    ctx.constrain_equal(src.cell(), dst.as_ref().cell())?;
+                }
+
+                Ok(ec_point)
+            }
+
+            fn assign_ec_point_to_limbs(
+                &self,
+                _: &mut Self::Context,
+                ec_point: impl Deref<Target = Self::AssignedEcPoint>,
+            ) -> Result<Vec<Self::AssignedCell>, plonk::Error> {
+                Ok(iter::empty()
+                    .chain(ec_point.x().limbs())
+                    .chain(ec_point.y().limbs())
+                    .map(|limb| limb.as_ref())
+                    .cloned()
+                    .collect())
             }
         }
     }

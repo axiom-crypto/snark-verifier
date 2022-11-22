@@ -10,6 +10,7 @@ use crate::{
 use rand::Rng;
 use std::fmt::Debug;
 
+pub mod ipa;
 pub mod kzg;
 
 pub trait PolynomialCommitmentScheme<C, L>: Clone + Debug
@@ -123,7 +124,7 @@ where
     L: Loader<C>,
     PCS: PolynomialCommitmentScheme<C, L>,
 {
-    fn from_repr(repr: Vec<L::LoadedScalar>) -> Result<PCS::Accumulator, Error>;
+    fn from_repr(repr: &[&L::LoadedScalar]) -> Result<PCS::Accumulator, Error>;
 }
 
 impl<C, L, PCS> AccumulatorEncoding<C, L, PCS> for ()
@@ -132,7 +133,7 @@ where
     L: Loader<C>,
     PCS: PolynomialCommitmentScheme<C, L>,
 {
-    fn from_repr(_: Vec<L::LoadedScalar>) -> Result<PCS::Accumulator, Error> {
+    fn from_repr(_: &[&L::LoadedScalar]) -> Result<PCS::Accumulator, Error> {
         unimplemented!()
     }
 }
