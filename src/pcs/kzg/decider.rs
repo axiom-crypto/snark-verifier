@@ -60,7 +60,15 @@ mod native {
         ) -> bool {
             !accumulators
                 .into_iter()
-                .any(|accumulator| !Self::decide(dk, accumulator))
+                //.enumerate()
+                .any(|accumulator| {
+                    /*let decide = Self::decide(dk, accumulator);
+                    if !decide {
+                        panic!("{i}");
+                    }
+                    !decide*/
+                    !Self::decide(dk, accumulator)
+                })
         }
     }
 }

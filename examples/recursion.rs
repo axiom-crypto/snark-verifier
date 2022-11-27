@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+use ark_std::{end_timer, start_timer};
 use common::*;
 use halo2_base::utils::fs::gen_srs;
 use halo2_curves::{
@@ -44,6 +45,8 @@ use rand_chacha::{
     ChaCha20Rng,
 };
 use std::{fs, iter, marker::PhantomData, rc::Rc};
+
+use crate::recursion::AggregationConfigParams;
 
 const LIMBS: usize = 3;
 const BITS: usize = 88;
@@ -137,6 +140,11 @@ mod common {
         fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
             None
         }
+
+        /// Output the simple selector columns (before selector compression) of the circuit
+        fn selectors(config: &Self::Config) -> Vec<Selector> {
+            vec![]
+        }
     }
 
     pub fn gen_pk<C: Circuit<Fr>>(params: &ParamsKZG<Bn256>, circuit: &C) -> ProvingKey<G1Affine> {
@@ -151,9 +159,11 @@ mod common {
         instances: Vec<Vec<Fr>>,
     ) -> Vec<u8> {
         if params.k() > 3 {
+            let mock = start_timer!(|| "Mock prover");
             MockProver::run(params.k(), &circuit, instances.clone())
                 .unwrap()
                 .assert_satisfied();
+            end_timer!(mock);
         }
 
         let instances = instances.iter().map(Vec::as_slice).collect_vec();
@@ -214,7 +224,7 @@ mod common {
     ) -> Snark {
         struct CsProxy<F, C>(PhantomData<(F, C)>);
 
-        impl<F: Field, C: Circuit<F>> Circuit<F> for CsProxy<F, C> {
+        impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C> {
             type Config = C::Config;
             type FloorPlanner = C::FloorPlanner;
 
@@ -226,7 +236,21 @@ mod common {
                 C::configure(meta)
             }
 
-            fn synthesize(&self, _: Self::Config, _: impl Layouter<F>) -> Result<(), Error> {
+            fn synthesize(
+                &self,
+                config: Self::Config,
+                mut layouter: impl Layouter<F>,
+            ) -> Result<(), Error> {
+                // when `C` has simple selectors, we tell `CsProxy` not to over-optimize the selectors (e.g., compressing them  all into one) by turning all selectors on in the first row
+                layouter.assign_region(
+                    || "",
+                    |mut region| {
+                        for q in C::selectors(&config).iter() {
+                            q.enable(&mut region, 0)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 Ok(())
             }
         }
@@ -563,10 +587,7 @@ mod recursion {
                     .protocol
                     .preprocessed
                     .iter()
-                    .flat_map(|preprocessed| {
-                        let coordinates = preprocessed.coordinates().unwrap();
-                        [*coordinates.x(), *coordinates.y()]
-                    })
+                    .flat_map(|preprocessed| [preprocessed.x, preprocessed.y])
                     .map(fe_to_fe)
                     .chain(previous.protocol.transcript_initial_state)
                     .collect_vec();
@@ -620,15 +641,13 @@ mod recursion {
         ) -> Result<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>, Error> {
             let [lhs, rhs] =
                 [self.default_accumulator.lhs, self.default_accumulator.rhs].map(|default| {
-                    loader
+                    let assigned = loader
                         .ecc_chip()
                         .assign_constant(&mut loader.ctx_mut(), default)
-                        .unwrap()
+                        .unwrap();
+                    loader.ec_point_from_assigned(assigned)
                 });
-            Ok(KzgAccumulator::new(
-                loader.ec_point_from_assigned(lhs),
-                loader.ec_point_from_assigned(rhs),
-            ))
+            Ok(KzgAccumulator::new(lhs, rhs))
         }
     }
 
@@ -652,7 +671,7 @@ mod recursion {
             let path = std::env::var("VERIFY_CONFIG")
                 .unwrap_or_else(|_| "configs/verify_circuit.config".to_owned());
             let params: AggregationConfigParams = serde_json::from_reader(
-                File::open(path.as_str()).expect(format!("{path} file should exist").as_str()),
+                File::open(path.as_str()).unwrap_or_else(|err| panic!("{err:?}")),
             )
             .unwrap();
 
@@ -790,6 +809,10 @@ mod recursion {
                     ] {
                         ctx.region.constrain_equal(lhs.cell(), rhs.cell())?;
                     }
+
+                    // IMPORTANT:
+                    config.base_field_config.finalize(&mut ctx);
+
                     assigned_instances.extend(
                         [lhs.x(), lhs.y(), rhs.x(), rhs.y()]
                             .into_iter()
@@ -801,6 +824,7 @@ mod recursion {
                 },
             )?;
 
+            assert_eq!(assigned_instances.len(), 4 * LIMBS + 4);
             for (row, limb) in assigned_instances.into_iter().enumerate() {
                 layouter.constrain_instance(limb, config.instance, row)?;
             }
@@ -822,6 +846,17 @@ mod recursion {
         fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
             Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())
         }
+
+        /*fn selectors(config: &Self::Config) -> Vec<Selector> {
+            config
+                .base_field_config
+                .range
+                .gate
+                .basic_gates
+                .iter()
+                .map(|gate| gate.q_enable)
+                .collect()
+        }*/
     }
 
     pub fn gen_recursion_pk<ConcreteCircuit: CircuitExt<Fr>>(
@@ -854,14 +889,17 @@ mod recursion {
             RecursionCircuit::initial_snark(recursion_params, Some(recursion_pk.get_vk()));
         for (round, input) in inputs.into_iter().enumerate() {
             state = app.state_transition(input);
+            println!("Generate app snark");
+            let app_snark = gen_snark(app_params, app_pk, app);
             let recursion = RecursionCircuit::new(
                 recursion_params,
-                gen_snark(app_params, app_pk, app),
+                app_snark,
                 previous,
                 initial_state,
                 state,
                 round,
             );
+            println!("Generate recursion snark");
             previous = gen_snark(recursion_params, recursion_pk, recursion);
             app = ConcreteCircuit::new(state);
         }
@@ -871,16 +909,23 @@ mod recursion {
 
 fn main() {
     let app_params = gen_srs(3);
-    let recursion_params = gen_srs(22);
+    let recursion_config: AggregationConfigParams =
+        serde_json::from_reader(fs::File::open("configs/verify_circuit.config").unwrap()).unwrap();
+    let k = recursion_config.degree;
+    let recursion_params = gen_srs(k);
 
     let app_pk = gen_pk(&app_params, &application::Square::default());
+
+    let pk_time = start_timer!(|| "Generate recursion pk");
     let recursion_pk = recursion::gen_recursion_pk::<application::Square>(
         &recursion_params,
         &app_params,
         app_pk.get_vk(),
     );
+    end_timer!(pk_time);
 
-    let num_round = 3;
+    let num_round = 1;
+    let pf_time = start_timer!(|| "Generate full recursive snark");
     let (final_state, snark) = recursion::gen_recursion_snark::<application::Square>(
         &app_params,
         &recursion_params,
@@ -889,6 +934,7 @@ fn main() {
         Fr::from(2u64),
         vec![(); num_round],
     );
+    end_timer!(pf_time);
     assert_eq!(final_state, Fr::from(2u64).pow(&[1 << num_round, 0, 0, 0]));
 
     let accept = {

@@ -335,16 +335,15 @@ mod halo2_lib {
                 impl Deref<Target = Self::AssignedEcPoint>,
             )],
         ) -> Result<Self::AssignedEcPoint, Error> {
+            let (scalars, points): (Vec<_>, Vec<_>) = pairs
+                .iter()
+                .map(|(scalar, point)| (vec![scalar.deref().clone()], point.deref().clone()))
+                .unzip();
+
             Ok(self.multi_scalar_mult::<C>(
                 ctx,
-                &pairs
-                    .iter()
-                    .map(|(_, point)| point.deref().clone())
-                    .collect_vec(),
-                &pairs
-                    .iter()
-                    .map(|(scalar, _)| vec![scalar.deref().clone()])
-                    .collect_vec(),
+                &points,
+                &scalars,
                 <C::Scalar as PrimeField>::NUM_BITS as usize,
                 4, // empirically clump factor of 4 seems to be best
             ))
@@ -355,14 +354,22 @@ mod halo2_lib {
             ctx: &mut Self::Context,
             pairs: &[(impl Deref<Target = Self::AssignedScalar>, C)],
         ) -> Result<Self::AssignedEcPoint, Error> {
+            let (scalars, points): (Vec<_>, Vec<_>) = pairs
+                .iter()
+                .filter_map(|(scalar, point)| {
+                    if point.is_identity().into() {
+                        None
+                    } else {
+                        Some((vec![scalar.deref().clone()], *point))
+                    }
+                })
+                .unzip();
+
             Ok(BaseFieldEccChip::<C>::fixed_base_msm::<C>(
                 self,
                 ctx,
-                &pairs.iter().map(|(_, point)| *point).collect_vec(),
-                &pairs
-                    .iter()
-                    .map(|(scalar, _)| vec![scalar.deref().clone()])
-                    .collect_vec(),
+                &points,
+                &scalars,
                 <C::Scalar as PrimeField>::NUM_BITS as usize,
                 0,
                 4,
