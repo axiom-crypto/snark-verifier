@@ -142,7 +142,7 @@ mod common {
         }
 
         /// Output the simple selector columns (before selector compression) of the circuit
-        fn selectors(config: &Self::Config) -> Vec<Selector> {
+        fn selectors(_: &Self::Config) -> Vec<Selector> {
             vec![]
         }
     }
@@ -242,6 +242,7 @@ mod common {
                 mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
                 // when `C` has simple selectors, we tell `CsProxy` not to over-optimize the selectors (e.g., compressing them  all into one) by turning all selectors on in the first row
+                // currently this only works if all simple selector columns are used in the actual circuit and there are overlaps amongst all enabled selectors (i.e., the actual circuit will not optimize constraint system further)
                 layouter.assign_region(
                     || "",
                     |mut region| {
@@ -812,6 +813,8 @@ mod recursion {
 
                     // IMPORTANT:
                     config.base_field_config.finalize(&mut ctx);
+                    dbg!(ctx.total_advice);
+                    println!("Advice columns used: {}", ctx.advice_alloc[0][0].0 + 1);
 
                     assigned_instances.extend(
                         [lhs.x(), lhs.y(), rhs.x(), rhs.y()]
@@ -847,7 +850,7 @@ mod recursion {
             Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())
         }
 
-        /*fn selectors(config: &Self::Config) -> Vec<Selector> {
+        fn selectors(config: &Self::Config) -> Vec<Selector> {
             config
                 .base_field_config
                 .range
@@ -856,7 +859,7 @@ mod recursion {
                 .iter()
                 .map(|gate| gate.q_enable)
                 .collect()
-        }*/
+        }
     }
 
     pub fn gen_recursion_pk<ConcreteCircuit: CircuitExt<Fr>>(
