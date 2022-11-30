@@ -1,6 +1,3 @@
-#![feature(int_log)]
-#![feature(int_roundings)]
-#![feature(assert_matches)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::upper_case_acronyms)]
@@ -11,6 +8,10 @@ pub mod pcs;
 pub mod system;
 pub mod util;
 pub mod verifier;
+
+pub(crate) use halo2_base::halo2_proofs;
+pub(crate) use halo2_base::poseidon;
+pub(crate) use halo2_proofs::halo2curves as halo2_curves;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -23,10 +24,14 @@ pub enum Error {
 }
 
 #[derive(Clone, Debug)]
-pub struct Protocol<C: util::arithmetic::CurveAffine> {
+pub struct Protocol<C, L = loader::native::NativeLoader>
+where
+    C: util::arithmetic::CurveAffine,
+    L: loader::Loader<C>,
+{
     // Common description
     pub domain: util::arithmetic::Domain<C::Scalar>,
-    pub preprocessed: Vec<C>,
+    pub preprocessed: Vec<L::LoadedEcPoint>,
     pub num_instance: Vec<usize>,
     pub num_witness: Vec<usize>,
     pub num_challenge: Vec<usize>,
@@ -34,7 +39,7 @@ pub struct Protocol<C: util::arithmetic::CurveAffine> {
     pub queries: Vec<util::protocol::Query>,
     pub quotient: util::protocol::QuotientPolynomial<C::Scalar>,
     // Minor customization
-    pub transcript_initial_state: Option<C::Scalar>,
+    pub transcript_initial_state: Option<L::LoadedScalar>,
     pub instance_committing_key: Option<util::protocol::InstanceCommittingKey<C>>,
     pub linearization: Option<util::protocol::LinearizationStrategy>,
     pub accumulator_indices: Vec<Vec<(usize, usize)>>,

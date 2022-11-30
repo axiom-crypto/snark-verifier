@@ -1,14 +1,17 @@
 #![allow(clippy::type_complexity)]
 
+use ark_std::{end_timer, start_timer};
 use common::*;
-use halo2_curves::{
-    bn256::{Bn256, Fq, Fr, G1Affine},
-    group::ff::Field,
-    CurveAffine,
-};
+use halo2_base::halo2_proofs;
+use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     dev::MockProver,
+    halo2curves::{
+        bn256::{Bn256, Fq, Fr, G1Affine},
+        group::ff::Field,
+        CurveAffine, FieldExt,
+    },
     plonk::{
         self, create_proof, keygen_pk, keygen_vk, Circuit, ConstraintSystem, Error, ProvingKey,
         Selector, VerifyingKey,
@@ -25,15 +28,12 @@ use halo2_proofs::{
 };
 use itertools::Itertools;
 use plonk_verifier::{
-    loader::{self, native::NativeLoader, ScalarLoader},
+    loader::{self, native::NativeLoader, Loader, ScalarLoader},
     pcs::{
         kzg::{Gwc19, Kzg, KzgAccumulator, KzgAs, KzgSuccinctVerifyingKey, LimbsEncoding},
         AccumulationScheme, AccumulationSchemeProver,
     },
-    system::{
-        self,
-        halo2::{compile, Config},
-    },
+    system::halo2::{self, compile, Config},
     util::{
         arithmetic::{fe_to_fe, fe_to_limbs},
         hash,
@@ -41,12 +41,16 @@ use plonk_verifier::{
     verifier::{self, PlonkProof, PlonkVerifier},
     Protocol,
 };
-use rand::{rngs::OsRng, SeedableRng};
-use rand_chacha::ChaCha20Rng;
+use rand_chacha::{
+    rand_core::{OsRng, SeedableRng},
+    ChaCha20Rng,
+};
 use std::{fs, iter, marker::PhantomData, rc::Rc};
 
-const LIMBS: usize = 4;
-const BITS: usize = 68;
+use crate::recursion::AggregationConfigParams;
+
+const LIMBS: usize = 3;
+const BITS: usize = 88;
 const T: usize = 5;
 const RATE: usize = 4;
 const R_F: usize = 8;
@@ -58,12 +62,21 @@ type As = KzgAs<Pcs>;
 type Plonk = verifier::Plonk<Pcs, LimbsEncoding<LIMBS, BITS>>;
 type Poseidon<L> = hash::Poseidon<Fr, L, T, RATE>;
 type PoseidonTranscript<L, S> =
-    system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+    halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 
 mod common {
     use super::*;
-    use halo2_proofs::poly::commitment::Params;
+    use halo2_proofs::{plonk::verify_proof, poly::commitment::Params};
     use plonk_verifier::{cost::CostEstimation, util::transcript::TranscriptWrite};
+
+    pub fn poseidon<L: Loader<G1Affine>>(
+        loader: &L,
+        inputs: &[L::LoadedScalar],
+    ) -> L::LoadedScalar {
+        let mut hasher = Poseidon::new(loader, R_F, R_P);
+        hasher.update(inputs);
+        hasher.squeeze()
+    }
 
     pub struct Snark {
         pub protocol: Protocol<G1Affine>,
@@ -73,11 +86,7 @@ mod common {
 
     impl Snark {
         pub fn new(protocol: Protocol<G1Affine>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) -> Self {
-            Self {
-                protocol,
-                instances,
-                proof,
-            }
+            Self { protocol, instances, proof }
         }
     }
 
@@ -128,18 +137,10 @@ mod common {
         fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
             None
         }
-    }
 
-    pub fn gen_srs(k: u32) -> ParamsKZG<Bn256> {
-        let path = format!("./examples/k-{}.srs", k);
-        match fs::File::open(path.as_str()) {
-            Ok(mut file) => ParamsKZG::read(&mut file).unwrap(),
-            Err(_) => {
-                let params =
-                    ParamsKZG::<Bn256>::setup(k, ChaCha20Rng::from_seed(Default::default()));
-                params.write(&mut fs::File::create(path).unwrap()).unwrap();
-                params
-            }
+        /// Output the simple selector columns (before selector compression) of the circuit
+        fn selectors(_: &Self::Config) -> Vec<Selector> {
+            vec![]
         }
     }
 
@@ -155,25 +156,15 @@ mod common {
         instances: Vec<Vec<Fr>>,
     ) -> Vec<u8> {
         if params.k() > 3 {
-            MockProver::run(params.k(), &circuit, instances.clone())
-                .unwrap()
-                .assert_satisfied();
+            let mock = start_timer!(|| "Mock prover");
+            MockProver::run(params.k(), &circuit, instances.clone()).unwrap().assert_satisfied();
+            end_timer!(mock);
         }
 
-        let instances = instances
-            .iter()
-            .map(|instances| instances.as_slice())
-            .collect_vec();
+        let instances = instances.iter().map(Vec::as_slice).collect_vec();
         let proof = {
             let mut transcript = PoseidonTranscript::<NativeLoader, _>::new(Vec::new());
-            create_proof::<
-                KZGCommitmentScheme<Bn256>,
-                ProverGWC<_>,
-                _,
-                _,
-                PoseidonTranscript<NativeLoader, _>,
-                _,
-            >(
+            create_proof::<_, ProverGWC<_>, _, _, _, _>(
                 params,
                 pk,
                 &[circuit],
@@ -188,15 +179,15 @@ mod common {
         let accept = {
             let mut transcript = PoseidonTranscript::<NativeLoader, _>::new(proof.as_slice());
             VerificationStrategy::<_, VerifierGWC<_>>::finalize(
-            plonk::verify_proof::<_, VerifierGWC<_>, _, PoseidonTranscript<NativeLoader, _>, _>(
-                params.verifier_params(),
-                pk.get_vk(),
-                AccumulatorStrategy::new(params.verifier_params()),
-                &[instances.as_slice()],
-                &mut transcript,
+                verify_proof::<_, VerifierGWC<_>, _, _, _>(
+                    params.verifier_params(),
+                    pk.get_vk(),
+                    AccumulatorStrategy::new(params.verifier_params()),
+                    &[instances.as_slice()],
+                    &mut transcript,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        )
         };
         assert!(accept);
 
@@ -228,7 +219,7 @@ mod common {
     ) -> Snark {
         struct CsProxy<F, C>(PhantomData<(F, C)>);
 
-        impl<F: Field, C: Circuit<F>> Circuit<F> for CsProxy<F, C> {
+        impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C> {
             type Config = C::Config;
             type FloorPlanner = C::FloorPlanner;
 
@@ -236,11 +227,26 @@ mod common {
                 CsProxy(PhantomData)
             }
 
-            fn configure(meta: &mut plonk::ConstraintSystem<F>) -> Self::Config {
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 C::configure(meta)
             }
 
-            fn synthesize(&self, _: Self::Config, _: impl Layouter<F>) -> Result<(), plonk::Error> {
+            fn synthesize(
+                &self,
+                config: Self::Config,
+                mut layouter: impl Layouter<F>,
+            ) -> Result<(), Error> {
+                // when `C` has simple selectors, we tell `CsProxy` not to over-optimize the selectors (e.g., compressing them  all into one) by turning all selectors on in the first row
+                // currently this only works if all simple selector columns are used in the actual circuit and there are overlaps amongst all enabled selectors (i.e., the actual circuit will not optimize constraint system further)
+                layouter.assign_region(
+                    || "",
+                    |mut region| {
+                        for q in C::selectors(&config).iter() {
+                            q.enable(&mut region, 0)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 Ok(())
             }
         }
@@ -341,17 +347,18 @@ mod application {
 }
 
 mod recursion {
-    use super::*;
-    use halo2_wrong_ecc::{
-        integer::rns::Rns,
-        maingate::{
-            MainGate, MainGateConfig, MainGateInstructions, RangeChip, RangeConfig,
-            RangeInstructions, RegionCtx,
-        },
-        EccConfig,
-    };
+    use std::fs::File;
 
-    type BaseFieldEccChip = halo2_wrong_ecc::BaseFieldEccChip<G1Affine, LIMBS, BITS>;
+    use halo2_base::{
+        gates::GateInstructions, AssignedValue, Context, ContextParams, QuantumCell::Existing,
+    };
+    use halo2_ecc::ecc::EccChip;
+    use halo2_proofs::plonk::{Column, Instance};
+    use plonk_verifier::loader::halo2::{EccInstructions, IntegerInstructions};
+
+    use super::*;
+
+    type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
     type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
 
     pub trait StateTransition {
@@ -366,12 +373,10 @@ mod recursion {
         svk: &Svk,
         loader: &Rc<Halo2Loader<'a>>,
         snark: &SnarkWitness,
-        expected_preprocessed_digest: Option<AssignedCell<Fr, Fr>>,
-    ) -> (
-        Vec<Vec<AssignedCell<Fr, Fr>>>,
-        Vec<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>>,
-    ) {
-        let protocol = if let Some(expected_preprocessed_digest) = expected_preprocessed_digest {
+        preprocessed_digest: Option<AssignedValue<'a, Fr>>,
+    ) -> (Vec<Vec<AssignedValue<'a, Fr>>>, Vec<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>>) {
+        let protocol = if let Some(preprocessed_digest) = preprocessed_digest {
+            let preprocessed_digest = loader.scalar_from_assigned(preprocessed_digest);
             let protocol = snark.protocol.loaded_preprocessed_as_witness(loader);
             let inputs = protocol
                 .preprocessed
@@ -383,16 +388,7 @@ mod recursion {
                 })
                 .chain(protocol.transcript_initial_state.clone())
                 .collect_vec();
-            let preprocessed_digest = {
-                let mut hasher = Poseidon::new(loader, R_F, R_P);
-                hasher.update(&inputs);
-                hasher.squeeze()
-            };
-            let expected_preprocessed_digest =
-                loader.scalar_from_assigned(expected_preprocessed_digest);
-            loader
-                .assert_eq("", &preprocessed_digest, &expected_preprocessed_digest)
-                .unwrap();
+            loader.assert_eq("", &poseidon(loader, &inputs), &preprocessed_digest).unwrap();
             protocol
         } else {
             snark.protocol.loaded(loader)
@@ -402,10 +398,7 @@ mod recursion {
             .instances
             .iter()
             .map(|instances| {
-                instances
-                    .iter()
-                    .map(|instance| loader.assign_scalar(*instance))
-                    .collect_vec()
+                instances.iter().map(|instance| loader.assign_scalar(*instance)).collect_vec()
             })
             .collect_vec();
         let mut transcript = PoseidonTranscript::<Rc<Halo2Loader>, _>::new(loader, snark.proof());
@@ -416,10 +409,7 @@ mod recursion {
             instances
                 .into_iter()
                 .map(|instance| {
-                    instance
-                        .into_iter()
-                        .map(|instance| instance.assigned())
-                        .collect()
+                    instance.into_iter().map(|instance| instance.into_assigned()).collect()
                 })
                 .collect(),
             accumulators,
@@ -428,19 +418,15 @@ mod recursion {
 
     fn select_accumulator<'a>(
         loader: &Rc<Halo2Loader<'a>>,
-        condition: &AssignedCell<Fr, Fr>,
+        condition: &AssignedValue<'a, Fr>,
         lhs: &KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
         rhs: &KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
     ) -> Result<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>, Error> {
         let [lhs, rhs]: [_; 2] = [lhs.lhs.assigned(), lhs.rhs.assigned()]
             .iter()
             .zip([rhs.lhs.assigned(), rhs.rhs.assigned()].iter())
-            .map(|(lhs, rhs)| {
-                loader
-                    .ecc_chip()
-                    .select(&mut loader.ctx_mut(), condition, lhs, rhs)
-            })
-            .collect::<Result<Vec<_>, _>>()?
+            .map(|(lhs, rhs)| loader.ecc_chip().select(&mut loader.ctx_mut(), lhs, rhs, condition))
+            .collect::<Vec<_>>()
             .try_into()
             .unwrap();
         Ok(KzgAccumulator::new(
@@ -459,26 +445,61 @@ mod recursion {
         As::verify(&Default::default(), &accumulators, &proof).unwrap()
     }
 
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub struct AggregationConfigParams {
+        pub strategy: halo2_ecc::fields::fp::FpStrategy,
+        pub degree: u32,
+        pub num_advice: usize,
+        pub num_lookup_advice: usize,
+        pub num_fixed: usize,
+        pub lookup_bits: usize,
+        pub limb_bits: usize,
+        pub num_limbs: usize,
+    }
+
     #[derive(Clone)]
     pub struct RecursionConfig {
-        main_gate_config: MainGateConfig,
-        range_config: RangeConfig,
+        pub base_field_config: halo2_ecc::fields::fp::FpConfig<Fr, Fq>,
+        pub instance: Column<Instance>,
     }
 
     impl RecursionConfig {
-        pub fn main_gate(&self) -> MainGate<Fr> {
-            MainGate::new(self.main_gate_config.clone())
+        pub fn configure(meta: &mut ConstraintSystem<Fr>, params: AggregationConfigParams) -> Self {
+            assert!(
+                params.limb_bits == BITS && params.num_limbs == LIMBS,
+                "For now we fix limb_bits = {}, otherwise change code",
+                BITS
+            );
+            let base_field_config = halo2_ecc::fields::fp::FpConfig::configure(
+                meta,
+                params.strategy,
+                &[params.num_advice],
+                &[params.num_lookup_advice],
+                params.num_fixed,
+                params.lookup_bits,
+                params.limb_bits,
+                params.num_limbs,
+                halo2_base::utils::modulus::<Fq>(),
+                0,
+                params.degree as usize,
+            );
+
+            let instance = meta.instance_column();
+            meta.enable_equality(instance);
+
+            Self { base_field_config, instance }
         }
 
-        pub fn range_chip(&self) -> RangeChip<Fr> {
-            RangeChip::new(self.range_config.clone())
+        pub fn gate(&self) -> &halo2_base::gates::flex_gate::FlexGateConfig<Fr> {
+            &self.base_field_config.range.gate
         }
 
-        pub fn ecc_chip(&self) -> BaseFieldEccChip {
-            BaseFieldEccChip::new(EccConfig::new(
-                self.range_config.clone(),
-                self.main_gate_config.clone(),
-            ))
+        pub fn range(&self) -> &halo2_base::gates::range::RangeConfig<Fr> {
+            &self.base_field_config.range
+        }
+
+        pub fn ecc_chip(&self) -> halo2_ecc::ecc::BaseFieldEccChip<G1Affine> {
+            EccChip::construct(self.base_field_config.clone())
         }
     }
 
@@ -521,11 +542,10 @@ mod recursion {
 
             let accumulators = iter::empty()
                 .chain(succinct_verify(&app))
-                .chain(
-                    (round > 0)
-                        .then_some(succinct_verify(&previous))
-                        .unwrap_or_else(|| vec![default_accumulator.clone(); 2]),
-                )
+                .chain((round > 0).then(|| succinct_verify(&previous)).unwrap_or_else(|| {
+                    let num_accumulator = 1 + previous.protocol.accumulator_indices.len();
+                    vec![default_accumulator.clone(); num_accumulator]
+                }))
                 .collect_vec();
 
             let (accumulator, as_proof) = {
@@ -541,32 +561,18 @@ mod recursion {
                     .protocol
                     .preprocessed
                     .iter()
-                    .flat_map(|preprocessed| {
-                        let coordinates = preprocessed.coordinates().unwrap();
-                        [*coordinates.x(), *coordinates.y()]
-                    })
+                    .flat_map(|preprocessed| [preprocessed.x, preprocessed.y])
                     .map(fe_to_fe)
                     .chain(previous.protocol.transcript_initial_state)
                     .collect_vec();
-                let mut poseidon = Poseidon::new(&NativeLoader, R_F, R_P);
-                poseidon.update(&inputs);
-                poseidon.squeeze()
+                poseidon(&NativeLoader, &inputs)
             };
-            let instances = [
-                accumulator.lhs.x,
-                accumulator.lhs.y,
-                accumulator.rhs.x,
-                accumulator.rhs.y,
-            ]
-            .into_iter()
-            .flat_map(fe_to_limbs::<_, _, LIMBS, BITS>)
-            .chain([
-                preprocessed_digest,
-                initial_state,
-                state,
-                Fr::from(round as u64),
-            ])
-            .collect();
+            let instances =
+                [accumulator.lhs.x, accumulator.lhs.y, accumulator.rhs.x, accumulator.rhs.y]
+                    .into_iter()
+                    .flat_map(fe_to_limbs::<_, _, LIMBS, BITS>)
+                    .chain([preprocessed_digest, initial_state, state, Fr::from(round as u64)])
+                    .collect();
 
             Self {
                 svk,
@@ -600,15 +606,11 @@ mod recursion {
         ) -> Result<KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>, Error> {
             let [lhs, rhs] =
                 [self.default_accumulator.lhs, self.default_accumulator.rhs].map(|default| {
-                    loader
-                        .ecc_chip()
-                        .assign_constant(&mut loader.ctx_mut(), default)
-                        .unwrap()
+                    let assigned =
+                        loader.ecc_chip().assign_constant(&mut loader.ctx_mut(), default).unwrap();
+                    loader.ec_point_from_assigned(assigned)
                 });
-            Ok(KzgAccumulator::new(
-                loader.ec_point_from_assigned(lhs),
-                loader.ec_point_from_assigned(rhs),
-            ))
+            Ok(KzgAccumulator::new(lhs, rhs))
         }
     }
 
@@ -629,65 +631,59 @@ mod recursion {
         }
 
         fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            let main_gate_config = MainGate::<Fr>::configure(meta);
-            let range_config = RangeChip::<Fr>::configure(
-                meta,
-                &main_gate_config,
-                vec![BITS / LIMBS],
-                Rns::<Fq, Fr, LIMBS, BITS>::construct().overflow_lengths(),
-            );
-            RecursionConfig {
-                main_gate_config,
-                range_config,
-            }
+            let path = std::env::var("VERIFY_CONFIG")
+                .unwrap_or_else(|_| "configs/verify_circuit.config".to_owned());
+            let params: AggregationConfigParams = serde_json::from_reader(
+                File::open(path.as_str()).unwrap_or_else(|err| panic!("{err:?}")),
+            )
+            .unwrap();
+
+            RecursionConfig::configure(meta, params)
         }
 
         fn synthesize(
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<Fr>,
-        ) -> Result<(), plonk::Error> {
-            let main_gate = config.main_gate();
-            let range_chip = config.range_chip();
+        ) -> Result<(), Error> {
+            config.range().load_lookup_table(&mut layouter)?;
+            let max_rows = config.range().gate.max_rows;
+            let main_gate = config.gate();
 
-            range_chip.load_table(&mut layouter)?;
-
-            let [preprocessed_digest, initial_state, state, round, first_round, not_first_round] =
-                layouter.assign_region(
-                    || "",
-                    |region| {
-                        let mut ctx = RegionCtx::new(region, 0);
-                        let [preprocessed_digest, initial_state, state, round] = [
-                            self.instances[Self::PREPROCESSED_DIGEST_ROW],
-                            self.instances[Self::INITIAL_STATE_ROW],
-                            self.instances[Self::STATE_ROW],
-                            self.instances[Self::ROUND_ROW],
-                        ]
-                        .map(|instance| {
-                            main_gate
-                                .assign_value(&mut ctx, Value::known(instance))
-                                .unwrap()
-                        });
-                        let first_round = main_gate.is_zero(&mut ctx, &round)?;
-                        let not_first_round = main_gate.not(&mut ctx, &first_round)?;
-                        Ok([
-                            preprocessed_digest,
-                            initial_state,
-                            state,
-                            round,
-                            first_round,
-                            not_first_round,
-                        ])
-                    },
-                )?;
-
-            let (lhs, rhs, app_instances, previous_instances) = layouter.assign_region(
+            let mut first_pass = halo2_base::SKIP_FIRST_PASS; // assume using simple floor planner
+            let mut assigned_instances = Vec::new();
+            layouter.assign_region(
                 || "",
                 |region| {
-                    let loader = Halo2Loader::new(config.ecc_chip(), RegionCtx::new(region, 0));
-                    let (app_instances, app_accumulators) =
+                    if first_pass {
+                        first_pass = false;
+                        return Ok(());
+                    }
+                    let mut ctx = Context::new(
+                        region,
+                        ContextParams {
+                            max_rows,
+                            num_advice: vec![config.base_field_config.range.gate.num_advice],
+                            fixed_columns: config.base_field_config.range.gate.constants.clone(),
+                        },
+                    );
+
+                    let [preprocessed_digest, initial_state, state, round] = [
+                        self.instances[Self::PREPROCESSED_DIGEST_ROW],
+                        self.instances[Self::INITIAL_STATE_ROW],
+                        self.instances[Self::STATE_ROW],
+                        self.instances[Self::ROUND_ROW],
+                    ]
+                    .map(|instance| {
+                        main_gate.assign_integer(&mut ctx, Value::known(instance)).unwrap()
+                    });
+                    let first_round = main_gate.is_zero(&mut ctx, &round);
+                    let not_first_round = main_gate.not(&mut ctx, Existing(&first_round));
+
+                    let loader = Halo2Loader::new(config.ecc_chip(), ctx);
+                    let (mut app_instances, app_accumulators) =
                         succinct_verify(&self.svk, &loader, &self.app, None);
-                    let (previous_instances, previous_accumulators) = succinct_verify(
+                    let (mut previous_instances, previous_accumulators) = succinct_verify(
                         &self.svk,
                         &loader,
                         &self.previous,
@@ -713,66 +709,87 @@ mod recursion {
                         self.as_proof(),
                     );
 
-                    Ok((
-                        lhs.assigned(),
-                        rhs.assigned(),
-                        app_instances,
-                        previous_instances,
-                    ))
-                },
-            )?;
+                    let lhs = lhs.into_assigned();
+                    let rhs = rhs.into_assigned();
+                    let app_instances = app_instances.pop().unwrap();
+                    let previous_instances = previous_instances.pop().unwrap();
 
-            layouter.assign_region(
-                || "",
-                |region| {
-                    let mut ctx = RegionCtx::new(region, 0);
+                    let mut ctx = loader.ctx_mut();
                     for (lhs, rhs) in [
                         // Propagate preprocessed_digest
                         (
-                            &main_gate.mul(&mut ctx, &preprocessed_digest, &not_first_round)?,
-                            &previous_instances[0][Self::PREPROCESSED_DIGEST_ROW],
+                            &main_gate.mul(
+                                &mut ctx,
+                                Existing(&preprocessed_digest),
+                                Existing(&not_first_round),
+                            ),
+                            &previous_instances[Self::PREPROCESSED_DIGEST_ROW],
                         ),
                         // Propagate initial_state
                         (
-                            &main_gate.mul(&mut ctx, &initial_state, &not_first_round)?,
-                            &previous_instances[0][Self::INITIAL_STATE_ROW],
+                            &main_gate.mul(
+                                &mut ctx,
+                                Existing(&initial_state),
+                                Existing(&not_first_round),
+                            ),
+                            &previous_instances[Self::INITIAL_STATE_ROW],
                         ),
                         // Verify initial_state is same as the first application snark
                         (
-                            &main_gate.mul(&mut ctx, &initial_state, &first_round)?,
-                            &main_gate.mul(&mut ctx, &app_instances[0][0], &first_round)?,
+                            &main_gate.mul(
+                                &mut ctx,
+                                Existing(&initial_state),
+                                Existing(&first_round),
+                            ),
+                            &main_gate.mul(
+                                &mut ctx,
+                                Existing(&app_instances[0]),
+                                Existing(&first_round),
+                            ),
                         ),
                         // Verify current state is same as the current application snark
-                        (&state, &app_instances[0][1]),
+                        (&state, &app_instances[1]),
                         // Verify previous state is same as the current application snark
                         (
-                            &main_gate.mul(&mut ctx, &app_instances[0][0], &not_first_round)?,
-                            &previous_instances[0][Self::STATE_ROW],
+                            &main_gate.mul(
+                                &mut ctx,
+                                Existing(&app_instances[0]),
+                                Existing(&not_first_round),
+                            ),
+                            &previous_instances[Self::STATE_ROW],
                         ),
                         // Verify round is increased by 1 when not at first round
                         (
                             &round,
                             &main_gate.add(
                                 &mut ctx,
-                                &not_first_round,
-                                &previous_instances[0][Self::ROUND_ROW],
-                            )?,
+                                Existing(&not_first_round),
+                                Existing(&previous_instances[Self::ROUND_ROW]),
+                            ),
                         ),
                     ] {
-                        main_gate.assert_equal(&mut ctx, lhs, rhs)?;
+                        ctx.region.constrain_equal(lhs.cell(), rhs.cell());
                     }
+
+                    // IMPORTANT:
+                    config.base_field_config.finalize(&mut ctx);
+                    dbg!(ctx.total_advice);
+                    println!("Advice columns used: {}", ctx.advice_alloc[0][0].0 + 1);
+
+                    assigned_instances.extend(
+                        [lhs.x(), lhs.y(), rhs.x(), rhs.y()]
+                            .into_iter()
+                            .flat_map(|coordinate| coordinate.limbs())
+                            .chain([preprocessed_digest, initial_state, state, round].iter())
+                            .map(|assigned| assigned.cell()),
+                    );
                     Ok(())
                 },
             )?;
 
-            for (row, limb) in [lhs.x(), lhs.y(), rhs.x(), rhs.y()]
-                .into_iter()
-                .flat_map(|coordinate| coordinate.limbs())
-                .map_into()
-                .chain([preprocessed_digest, initial_state, state, round])
-                .enumerate()
-            {
-                main_gate.expose_public(layouter.namespace(|| ""), limb, row)?;
+            assert_eq!(assigned_instances.len(), 4 * LIMBS + 4);
+            for (row, limb) in assigned_instances.into_iter().enumerate() {
+                layouter.constrain_instance(limb, config.instance, row);
             }
 
             Ok(())
@@ -792,11 +809,22 @@ mod recursion {
         fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
             Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())
         }
+
+        fn selectors(config: &Self::Config) -> Vec<Selector> {
+            config
+                .base_field_config
+                .range
+                .gate
+                .basic_gates
+                .iter()
+                .map(|gate| gate.q_enable)
+                .collect()
+        }
     }
 
     pub fn gen_recursion_pk<ConcreteCircuit: CircuitExt<Fr>>(
-        app_params: &ParamsKZG<Bn256>,
         recursion_params: &ParamsKZG<Bn256>,
+        app_params: &ParamsKZG<Bn256>,
         app_vk: &VerifyingKey<G1Affine>,
     ) -> ProvingKey<G1Affine> {
         let recursion = RecursionCircuit::new(
@@ -824,14 +852,17 @@ mod recursion {
             RecursionCircuit::initial_snark(recursion_params, Some(recursion_pk.get_vk()));
         for (round, input) in inputs.into_iter().enumerate() {
             state = app.state_transition(input);
+            println!("Generate app snark");
+            let app_snark = gen_snark(app_params, app_pk, app);
             let recursion = RecursionCircuit::new(
                 recursion_params,
-                gen_snark(app_params, app_pk, app),
+                app_snark,
                 previous,
                 initial_state,
                 state,
                 round,
             );
+            println!("Generate recursion snark");
             previous = gen_snark(recursion_params, recursion_pk, recursion);
             app = ConcreteCircuit::new(state);
         }
@@ -841,25 +872,33 @@ mod recursion {
 
 fn main() {
     let app_params = gen_srs(3);
-    let recursion_params = gen_srs(22);
+    let recursion_config: AggregationConfigParams =
+        serde_json::from_reader(fs::File::open("configs/verify_circuit.config").unwrap()).unwrap();
+    let k = recursion_config.degree;
+    let recursion_params = gen_srs(k);
 
     let app_pk = gen_pk(&app_params, &application::Square::default());
+
+    let pk_time = start_timer!(|| "Generate recursion pk");
     let recursion_pk = recursion::gen_recursion_pk::<application::Square>(
-        &app_params,
         &recursion_params,
+        &app_params,
         app_pk.get_vk(),
     );
+    end_timer!(pk_time);
 
-    let num_round = 3;
+    let num_round = 1;
+    let pf_time = start_timer!(|| "Generate full recursive snark");
     let (final_state, snark) = recursion::gen_recursion_snark::<application::Square>(
         &app_params,
         &recursion_params,
         &app_pk,
         &recursion_pk,
-        Fr::from(2),
+        Fr::from(2u64),
         vec![(); num_round],
     );
-    assert_eq!(final_state, Fr::from(256));
+    end_timer!(pf_time);
+    assert_eq!(final_state, Fr::from(2u64).pow(&[1 << num_round, 0, 0, 0]));
 
     let accept = {
         let svk = recursion_params.get_g()[0].into();

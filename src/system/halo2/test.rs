@@ -1,25 +1,37 @@
-use super::{read_or_create_srs, Halo2VerifierCircuitConfigParams};
-use ark_std::{end_timer, start_timer};
-use halo2_proofs::{
+use crate::halo2_proofs::{
+    dev::MockProver,
     plonk::{create_proof, verify_proof, Circuit, ProvingKey},
     poly::{
-        commitment::{CommitmentScheme, ParamsProver, Prover, Verifier},
+        commitment::{CommitmentScheme, Params, ParamsProver, Prover, Verifier},
         VerificationStrategy,
     },
     transcript::{EncodedChallenge, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
+use crate::util::arithmetic::CurveAffine;
 use rand_chacha::rand_core::RngCore;
-use std::io::Cursor;
+use std::{fs, io::Cursor};
 
+mod circuit;
+// mod ipa;
 mod kzg;
 
-pub fn load_verify_circuit_degree() -> u32 {
-    let path = "./configs/verify_circuit.config";
-    let params_str =
-        std::fs::read_to_string(path).expect(format!("{} file should exist", path).as_str());
-    let params: Halo2VerifierCircuitConfigParams =
-        serde_json::from_str(params_str.as_str()).unwrap();
-    params.degree
+pub use circuit::standard::StandardPlonk;
+
+pub fn read_or_create_srs<'a, C: CurveAffine, P: ParamsProver<'a, C>>(
+    dir: &str,
+    k: u32,
+    setup: impl Fn(u32) -> P,
+) -> P {
+    let path = format!("{}/k-{}.srs", dir, k);
+    match fs::File::open(path.as_str()) {
+        Ok(mut file) => P::read(&mut file).unwrap(),
+        Err(_) => {
+            fs::create_dir_all(dir).unwrap();
+            let params = setup(k);
+            params.write(&mut fs::File::create(path).unwrap()).unwrap();
+            params
+        }
+    }
 }
 
 pub fn create_proof_checked<'a, S, C, P, V, VS, TW, TR, EC, R>(
@@ -42,7 +54,16 @@ where
     EC: EncodedChallenge<S::Curve>,
     R: RngCore,
 {
-    let proof_time = start_timer!(|| "create proof");
+    for (circuit, instances) in circuits.iter().zip(instances.iter()) {
+        MockProver::run(
+            params.k(),
+            circuit,
+            instances.iter().map(|instance| instance.to_vec()).collect(),
+        )
+        .unwrap()
+        .assert_satisfied();
+    }
+
     let proof = {
         let mut transcript = TW::init(Vec::new());
         create_proof::<S, P, _, _, _, _>(
@@ -56,58 +77,34 @@ where
         .unwrap();
         transcript.finalize()
     };
-    end_timer!(proof_time);
-
-    let verify_time = start_timer!(|| "verify proof");
     let output = {
         let params = params.verifier_params();
         let strategy = VS::new(params);
         let mut transcript = TR::init(Cursor::new(proof.clone()));
         verify_proof(params, pk.get_vk(), strategy, instances, &mut transcript).unwrap()
     };
-    end_timer!(verify_time);
 
     finalize(proof, output)
 }
 
 macro_rules! halo2_prepare {
     ($dir:expr, $k:expr, $setup:expr, $config:expr, $create_circuit:expr) => {{
-        use halo2_proofs::{plonk::{keygen_pk, keygen_vk}};
+        use $crate::halo2_proofs::plonk::{keygen_pk, keygen_vk};
+        use std::iter;
         use $crate::{
             system::halo2::{compile, test::read_or_create_srs},
-            util::{Itertools},
+            util::{arithmetic::GroupEncoding, Itertools},
         };
-        use ark_std::{start_timer, end_timer};
 
-        let circuits = (0..$config.num_proof).map(|_| $create_circuit).collect_vec();
+        let params = read_or_create_srs($dir, $k, $setup);
 
-        /*
-        let mock_time = start_timer!(|| "mock prover");
-        let instances = circuits.iter().map(|circuit| circuit.instances()).collect_vec();
-
-        for (circuit, instance) in circuits.iter().zip(instances.iter()) {
-            MockProver::run(
-                $k,
-                circuit,
-                instance.clone(),
-            )
-            .unwrap()
-            .assert_satisfied();
-        }
-        end_timer!(mock_time);
-        */
-
-        let params = read_or_create_srs($k, $setup);
+        let circuits = iter::repeat_with(|| $create_circuit)
+            .take($config.num_proof)
+            .collect_vec();
 
         let pk = if $config.zk {
-            let vk_time = start_timer!(|| "vkey");
             let vk = keygen_vk(&params, &circuits[0]).unwrap();
-            end_timer!(vk_time);
-
-            let pk_time = start_timer!(|| "pkey");
             let pk = keygen_pk(&params, vk, &circuits[0]).unwrap();
-            end_timer!(pk_time);
-
             pk
         } else {
             // TODO: Re-enable optional-zk when it's merged in pse/halo2.
@@ -158,9 +155,10 @@ macro_rules! halo2_create_snark {
         $protocol:expr,
         $circuits:expr
     ) => {{
-        use itertools::Itertools;
         use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
-        use $crate::{loader::halo2::test::Snark, system::halo2::test::create_proof_checked};
+        use $crate::{
+            loader::halo2::test::Snark, system::halo2::test::create_proof_checked, util::Itertools,
+        };
 
         let instances = $circuits.iter().map(|circuit| circuit.instances()).collect_vec();
         let proof = {
@@ -204,7 +202,7 @@ macro_rules! halo2_native_verify {
         $svk:expr,
         $dk:expr
     ) => {{
-        use halo2_proofs::poly::commitment::ParamsProver;
+        use $crate::halo2_proofs::poly::commitment::ParamsProver;
         use $crate::verifier::PlonkVerifier;
 
         let proof =

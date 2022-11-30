@@ -19,15 +19,6 @@ impl<C: CurveAffine> LoadedEcPoint<C> for C {
     fn loader(&self) -> &NativeLoader {
         &LOADER
     }
-
-    fn multi_scalar_multiplication(pairs: impl IntoIterator<Item = (C::Scalar, C)>) -> Self {
-        pairs
-            .into_iter()
-            .map(|(scalar, base)| base * scalar)
-            .reduce(|acc, value| acc + value)
-            .unwrap()
-            .to_affine()
-    }
 }
 
 impl<F: PrimeField> FieldOps for F {
@@ -41,14 +32,6 @@ impl<F: PrimeField> LoadedScalar<F> for F {
 
     fn loader(&self) -> &NativeLoader {
         &LOADER
-    }
-
-    fn mul_add(a: &F, b: &F, c: &F) -> Self {
-        *a * *b + *c
-    }
-
-    fn mul_add_constant(a: &F, b: &F, c: &F) -> Self {
-        *a * *b + *c
     }
 }
 
@@ -65,7 +48,21 @@ impl<C: CurveAffine> EcPointLoader<C> for NativeLoader {
         lhs: &Self::LoadedEcPoint,
         rhs: &Self::LoadedEcPoint,
     ) -> Result<(), Error> {
-        lhs.eq(rhs).then_some(()).ok_or_else(|| Error::AssertionFailure(annotation.to_string()))
+        lhs.eq(rhs)
+            .then_some(())
+            .ok_or_else(|| Error::AssertionFailure(annotation.to_string()))
+    }
+
+    fn multi_scalar_multiplication(
+        pairs: &[(&<Self as ScalarLoader<C::Scalar>>::LoadedScalar, &C)],
+    ) -> C {
+        pairs
+            .iter()
+            .cloned()
+            .map(|(scalar, base)| *base * scalar)
+            .reduce(|acc, value| acc + value)
+            .unwrap()
+            .to_affine()
     }
 }
 
@@ -82,7 +79,9 @@ impl<F: PrimeField> ScalarLoader<F> for NativeLoader {
         lhs: &Self::LoadedScalar,
         rhs: &Self::LoadedScalar,
     ) -> Result<(), Error> {
-        lhs.eq(rhs).then_some(()).ok_or_else(|| Error::AssertionFailure(annotation.to_string()))
+        lhs.eq(rhs)
+            .then_some(())
+            .ok_or_else(|| Error::AssertionFailure(annotation.to_string()))
     }
 }
 

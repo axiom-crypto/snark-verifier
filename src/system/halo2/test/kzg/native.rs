@@ -1,16 +1,18 @@
-use crate::{
-    loader::halo2::test::StandardPlonk,
-    pcs::kzg::{Bdfg21, Gwc19, Kzg, LimbsEncoding},
-    system::halo2::test::kzg::{
-        halo2_kzg_config, halo2_kzg_create_snark, halo2_kzg_native_verify, halo2_kzg_prepare, BITS,
-        LIMBS,
-    },
-    verifier::Plonk,
-};
-use halo2_curves::bn256::{Bn256, G1Affine};
-use halo2_proofs::{
+use crate::halo2_curves::bn256::{Bn256, G1Affine};
+use crate::halo2_proofs::{
     poly::kzg::multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
     transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer},
+};
+use crate::{
+    pcs::kzg::{Bdfg21, Gwc19, Kzg, LimbsEncoding},
+    system::halo2::test::{
+        kzg::{
+            halo2_kzg_config, halo2_kzg_create_snark, halo2_kzg_native_verify, halo2_kzg_prepare,
+            BITS, LIMBS,
+        },
+        StandardPlonk,
+    },
+    verifier::Plonk,
 };
 use paste::paste;
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
@@ -58,3 +60,11 @@ test!(
     halo2_kzg_config!(true, 2),
     StandardPlonk::rand(ChaCha20Rng::from_seed(Default::default()))
 );
+/*
+test!(
+    zk_main_gate_with_range_with_mock_kzg_accumulator,
+    9,
+    halo2_kzg_config!(true, 2, (0..4 * LIMBS).map(|idx| (0, idx)).collect()),
+    main_gate_with_range_with_mock_kzg_accumulator::<Bn256>()
+);
+*/

@@ -4,7 +4,9 @@ use crate::{
         arithmetic::{CurveAffine, Domain, Field, Fraction, Rotation},
         Itertools,
     },
+    Protocol,
 };
+use num_integer::Integer;
 use num_traits::One;
 use std::{
     cmp::max,
@@ -13,6 +15,37 @@ use std::{
     iter::{self, Sum},
     ops::{Add, Mul, Neg, Sub},
 };
+
+impl<C> Protocol<C>
+where
+    C: CurveAffine,
+{
+    pub fn loaded<L: Loader<C>>(&self, loader: &L) -> Protocol<C, L> {
+        let preprocessed = self
+            .preprocessed
+            .iter()
+            .map(|preprocessed| loader.ec_point_load_const(preprocessed))
+            .collect();
+        let transcript_initial_state = self
+            .transcript_initial_state
+            .as_ref()
+            .map(|transcript_initial_state| loader.load_const(transcript_initial_state));
+        Protocol {
+            domain: self.domain.clone(),
+            preprocessed,
+            num_instance: self.num_instance.clone(),
+            num_witness: self.num_witness.clone(),
+            num_challenge: self.num_challenge.clone(),
+            evaluations: self.evaluations.clone(),
+            queries: self.queries.clone(),
+            quotient: self.quotient.clone(),
+            transcript_initial_state,
+            instance_committing_key: self.instance_committing_key.clone(),
+            linearization: self.linearization,
+            accumulator_indices: self.accumulator_indices.clone(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum CommonPolynomial {
@@ -49,11 +82,11 @@ where
         let langranges = langranges.into_iter().sorted().dedup().collect_vec();
 
         let one = loader.load_one();
-        let zn_minus_one = zn.clone() - one;
+        let zn_minus_one = zn.clone() - &one;
         let zn_minus_one_inv = Fraction::one_over(zn_minus_one.clone());
 
         let n_inv = loader.load_const(&domain.n_inv);
-        let numer = zn_minus_one.clone() * n_inv;
+        let numer = zn_minus_one.clone() * &n_inv;
         let omegas = langranges
             .iter()
             .map(|&i| loader.load_const(&domain.rotate_scalar(C::Scalar::one(), Rotation(i))))
@@ -116,7 +149,7 @@ pub struct QuotientPolynomial<F: Clone> {
 
 impl<F: Clone> QuotientPolynomial<F> {
     pub fn num_chunk(&self) -> usize {
-        (self.numerator.degree() - 1).div_ceil(self.chunk_degree)
+        Integer::div_ceil(&(self.numerator.degree() - 1), &self.chunk_degree)
     }
 }
 
@@ -345,7 +378,7 @@ fn merge_left_right<T: Ord>(a: Option<BTreeSet<T>>, b: Option<BTreeSet<T>>) -> O
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum LinearizationStrategy {
     /// Older linearization strategy of GWC19, which has linearization
     /// polynomial that doesn't evaluate to 0, and requires prover to send extra

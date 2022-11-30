@@ -1,3 +1,4 @@
+use crate::halo2_proofs;
 use crate::{
     loader::native::{self, NativeLoader},
     util::{

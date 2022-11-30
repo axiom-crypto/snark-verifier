@@ -5,7 +5,7 @@ use crate::{
     },
     Error,
 };
-use std::{fmt::Debug, iter};
+use std::{borrow::Cow, fmt::Debug, iter, ops::Deref};
 
 pub mod native;
 
@@ -19,10 +19,6 @@ pub trait LoadedEcPoint<C: CurveAffine>: Clone + Debug + PartialEq {
     type Loader: Loader<C, LoadedEcPoint = Self>;
 
     fn loader(&self) -> &Self::Loader;
-
-    fn multi_scalar_multiplication(
-        pairs: impl IntoIterator<Item = (<Self::Loader as ScalarLoader<C::Scalar>>::LoadedScalar, Self)>,
-    ) -> Self;
 }
 
 pub trait LoadedScalar<F: PrimeField>: Clone + Debug + PartialEq + FieldOps {
@@ -34,21 +30,8 @@ pub trait LoadedScalar<F: PrimeField>: Clone + Debug + PartialEq + FieldOps {
         self.clone() * self
     }
 
-    fn mul_add(a: &Self, b: &Self, c: &Self) -> Self;
-
-    fn mul_add_constant(a: &Self, b: &Self, c: &F) -> Self;
-
     fn invert(&self) -> Option<Self> {
         FieldOps::invert(self)
-    }
-
-    fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Self>)
-    where
-        Self: 'a,
-    {
-        values
-            .into_iter()
-            .for_each(|value| *value = LoadedScalar::invert(value).unwrap_or_else(|| value.clone()))
     }
 
     fn pow_const(&self, mut exp: u64) -> Self {
@@ -101,6 +84,12 @@ pub trait EcPointLoader<C: CurveAffine> {
         lhs: &Self::LoadedEcPoint,
         rhs: &Self::LoadedEcPoint,
     ) -> Result<(), Error>;
+
+    fn multi_scalar_multiplication(
+        pairs: &[(&Self::LoadedScalar, &Self::LoadedEcPoint)],
+    ) -> Self::LoadedEcPoint
+    where
+        Self: ScalarLoader<C::ScalarExt>;
 }
 
 pub trait ScalarLoader<F: PrimeField> {
@@ -123,7 +112,7 @@ pub trait ScalarLoader<F: PrimeField> {
         rhs: &Self::LoadedScalar,
     ) -> Result<(), Error>;
 
-    fn sum_with_coeff_and_constant(
+    fn sum_with_coeff_and_const(
         &self,
         values: &[(F, &Self::LoadedScalar)],
         constant: F,
@@ -134,19 +123,24 @@ pub trait ScalarLoader<F: PrimeField> {
 
         let loader = values.first().unwrap().1.loader();
         iter::empty()
-            .chain(if constant == F::zero() { None } else { Some(loader.load_const(&constant)) })
+            .chain(if constant == F::zero() {
+                None
+            } else {
+                Some(Cow::Owned(loader.load_const(&constant)))
+            })
             .chain(values.iter().map(|&(coeff, value)| {
                 if coeff == F::one() {
-                    value.clone()
+                    Cow::Borrowed(value)
                 } else {
-                    loader.load_const(&coeff) * value
+                    Cow::Owned(loader.load_const(&coeff) * value)
                 }
             }))
-            .reduce(|acc, term| acc + term)
+            .reduce(|acc, term| Cow::Owned(acc.into_owned() + term.deref()))
             .unwrap()
+            .into_owned()
     }
 
-    fn sum_products_with_coeff_and_constant(
+    fn sum_products_with_coeff_and_const(
         &self,
         values: &[(F, &Self::LoadedScalar, &Self::LoadedScalar)],
         constant: F,
@@ -157,7 +151,11 @@ pub trait ScalarLoader<F: PrimeField> {
 
         let loader = values.first().unwrap().1.loader();
         iter::empty()
-            .chain(if constant == F::zero() { None } else { Some(loader.load_const(&constant)) })
+            .chain(if constant == F::zero() {
+                None
+            } else {
+                Some(loader.load_const(&constant))
+            })
             .chain(values.iter().map(|&(coeff, lhs, rhs)| {
                 if coeff == F::one() {
                     lhs.clone() * rhs
@@ -170,28 +168,11 @@ pub trait ScalarLoader<F: PrimeField> {
     }
 
     fn sum_with_coeff(&self, values: &[(F, &Self::LoadedScalar)]) -> Self::LoadedScalar {
-        self.sum_with_coeff_and_constant(values, F::zero())
-    }
-
-    fn sum_products_with_coeff(
-        &self,
-        values: &[(F, &Self::LoadedScalar, &Self::LoadedScalar)],
-    ) -> Self::LoadedScalar {
-        self.sum_products_with_coeff_and_constant(values, F::zero())
-    }
-
-    fn sum_products(
-        &self,
-        values: &[(&Self::LoadedScalar, &Self::LoadedScalar)],
-    ) -> Self::LoadedScalar {
-        self.sum_products_with_coeff_and_constant(
-            &values.iter().map(|&(lhs, rhs)| (F::one(), lhs, rhs)).collect_vec(),
-            F::zero(),
-        )
+        self.sum_with_coeff_and_const(values, F::zero())
     }
 
     fn sum_with_const(&self, values: &[&Self::LoadedScalar], constant: F) -> Self::LoadedScalar {
-        self.sum_with_coeff_and_constant(
+        self.sum_with_coeff_and_const(
             &values.iter().map(|&value| (F::one(), value)).collect_vec(),
             constant,
         )
@@ -201,23 +182,53 @@ pub trait ScalarLoader<F: PrimeField> {
         self.sum_with_const(values, F::zero())
     }
 
+    fn sum_products_with_coeff(
+        &self,
+        values: &[(F, &Self::LoadedScalar, &Self::LoadedScalar)],
+    ) -> Self::LoadedScalar {
+        self.sum_products_with_coeff_and_const(values, F::zero())
+    }
+
+    fn sum_products_with_const(
+        &self,
+        values: &[(&Self::LoadedScalar, &Self::LoadedScalar)],
+        constant: F,
+    ) -> Self::LoadedScalar {
+        self.sum_products_with_coeff_and_const(
+            &values
+                .iter()
+                .map(|&(lhs, rhs)| (F::one(), lhs, rhs))
+                .collect_vec(),
+            constant,
+        )
+    }
+
+    fn sum_products(
+        &self,
+        values: &[(&Self::LoadedScalar, &Self::LoadedScalar)],
+    ) -> Self::LoadedScalar {
+        self.sum_products_with_const(values, F::zero())
+    }
+
     fn product(&self, values: &[&Self::LoadedScalar]) -> Self::LoadedScalar {
-        values.iter().fold(self.load_one(), |acc, value| acc * *value)
+        values
+            .iter()
+            .fold(self.load_one(), |acc, value| acc * *value)
+    }
+
+    fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Self::LoadedScalar>)
+    where
+        Self::LoadedScalar: 'a,
+    {
+        values
+            .into_iter()
+            .for_each(|value| *value = LoadedScalar::invert(value).unwrap_or_else(|| value.clone()))
     }
 }
 
 pub trait Loader<C: CurveAffine>:
     EcPointLoader<C> + ScalarLoader<C::ScalarExt> + Clone + Debug
 {
-    fn ec_point_select(
-        &self,
-        _a: &Self::LoadedEcPoint,
-        _b: &Self::LoadedEcPoint,
-        _sel: &Self::LoadedScalar,
-    ) -> Result<Self::LoadedEcPoint, Error> {
-        todo!()
-    }
-
     fn start_cost_metering(&self, _: &str) {}
 
     fn end_cost_metering(&self) {}

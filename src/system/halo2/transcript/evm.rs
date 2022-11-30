@@ -1,12 +1,13 @@
+use crate::halo2_proofs;
 use crate::{
     loader::{
         evm::{loader::Value, u256_to_fe, EcPoint, EvmLoader, MemoryChunk, Scalar},
         native::{self, NativeLoader},
         Loader,
     },
-    system::halo2::aggregation::KZG_QUERY_INSTANCE,
     util::{
         arithmetic::{Coordinates, CurveAffine, PrimeField},
+        hash::{Digest, Keccak256},
         transcript::{Transcript, TranscriptRead},
         Itertools,
     },
@@ -14,7 +15,6 @@ use crate::{
 };
 use ethereum_types::U256;
 use halo2_proofs::transcript::EncodedChallenge;
-use sha3::{Digest, Keccak256};
 use std::{
     io::{self, Read, Write},
     iter,
@@ -25,7 +25,6 @@ pub struct EvmTranscript<C: CurveAffine, L: Loader<C>, S, B> {
     loader: L,
     stream: S,
     buf: B,
-    query_instance_reset: bool,
     _marker: PhantomData<C>,
 }
 
@@ -34,14 +33,12 @@ where
     C: CurveAffine,
     C::Scalar: PrimeField<Repr = [u8; 0x20]>,
 {
-    pub fn new(loader: Rc<EvmLoader>) -> Self {
-        let ptr = if KZG_QUERY_INSTANCE { 0 } else { loader.allocate(0x20) };
+    pub fn new(loader: &Rc<EvmLoader>) -> Self {
+        let ptr = loader.allocate(0x20);
         assert_eq!(ptr, 0);
         let mut buf = MemoryChunk::new(ptr);
-        if !KZG_QUERY_INSTANCE {
-            buf.extend(0x20);
-        }
-        Self { loader, stream: 0, buf, query_instance_reset: false, _marker: PhantomData }
+        buf.extend(0x20);
+        Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
     }
 
     pub fn load_instances(&mut self, num_instance: Vec<usize>) -> Vec<Vec<Scalar>> {
@@ -101,18 +98,8 @@ where
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
-            // this should never to reached if a vk is first hashed into transcript
-            if KZG_QUERY_INSTANCE && !self.query_instance_reset && self.buf.end() != ptr {
-                self.buf.reset(self.loader.ptr());
-                self.query_instance_reset = true;
-            }
-            if self.buf.end() != ptr {
-                assert!(self.buf.end() > ptr && KZG_QUERY_INSTANCE);
-                self.loader.dup_ec_point(ec_point);
-                self.buf.extend(0x40);
-            } else {
-                self.buf.extend(0x40);
-            }
+            assert_eq!(self.buf.end(), ptr);
+            self.buf.extend(0x40);
         } else {
             unreachable!()
         }
@@ -122,12 +109,6 @@ where
     fn common_scalar(&mut self, scalar: &Scalar) -> Result<(), Error> {
         match scalar.value() {
             Value::Constant(_) if self.buf.ptr() == 0 => {
-                if KZG_QUERY_INSTANCE && !self.query_instance_reset {
-                    self.buf.reset(self.loader.ptr());
-                    self.buf.extend(0x20);
-                    self.loader.allocate(0x20);
-                    self.query_instance_reset = true;
-                }
                 self.loader.copy_scalar(scalar, self.buf.ptr());
             }
             Value::Memory(ptr) => {
@@ -165,13 +146,7 @@ where
     C: CurveAffine,
 {
     pub fn new(stream: S) -> Self {
-        Self {
-            loader: NativeLoader,
-            stream,
-            buf: Vec::new(),
-            query_instance_reset: false,
-            _marker: PhantomData,
-        }
+        Self { loader: NativeLoader, stream, buf: Vec::new(), _marker: PhantomData }
     }
 }
 

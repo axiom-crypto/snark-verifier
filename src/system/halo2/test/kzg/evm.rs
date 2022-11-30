@@ -1,10 +1,14 @@
+use crate::{halo2_curves, halo2_proofs};
 use crate::{
-    loader::{halo2::test::StandardPlonk, native::NativeLoader},
+    loader::native::NativeLoader,
     pcs::kzg::{Bdfg21, Gwc19, Kzg, LimbsEncoding},
     system::halo2::{
-        test::kzg::{
-            self, halo2_kzg_config, halo2_kzg_create_snark, halo2_kzg_native_verify,
-            halo2_kzg_prepare, BITS, LIMBS,
+        test::{
+            kzg::{
+                self, halo2_kzg_config, halo2_kzg_create_snark, halo2_kzg_native_verify,
+                halo2_kzg_prepare, BITS, LIMBS,
+            },
+            StandardPlonk,
         },
         transcript::evm::{ChallengeEvm, EvmTranscript},
     },
@@ -34,12 +38,13 @@ macro_rules! halo2_kzg_evm_verify {
         let runtime_code = {
             let svk = $params.get_g()[0].into();
             let dk = ($params.g2(), $params.s_g2()).into();
-            let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(loader.clone());
+            let protocol = $protocol.loaded(&loader);
+            let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
             let instances = transcript
                 .load_instances($instances.iter().map(|instances| instances.len()).collect_vec());
-            let proof = <$plonk_verifier>::read_proof(&svk, $protocol, &instances, &mut transcript)
+            let proof = <$plonk_verifier>::read_proof(&svk, &protocol, &instances, &mut transcript)
                 .unwrap();
-            <$plonk_verifier>::verify(&svk, &dk, $protocol, &instances, &proof).unwrap();
+            <$plonk_verifier>::verify(&svk, &dk, &protocol, &instances, &proof).unwrap();
 
             loader.runtime_code()
         };
@@ -107,12 +112,20 @@ test!(
     halo2_kzg_config!(true, 1),
     StandardPlonk::rand(ChaCha20Rng::from_seed(Default::default()))
 );
+/*
+test!(
+    zk_main_gate_with_range_with_mock_kzg_accumulator,
+    9,
+    halo2_kzg_config!(true, 1, (0..4 * LIMBS).map(|idx| (0, idx)).collect()),
+    main_gate_with_range_with_mock_kzg_accumulator::<Bn256>()
+);
+*/
 test!(
     #[cfg(feature = "loader_halo2")],
     #[ignore = "cause it requires 32GB memory to run"],
     zk_accumulation_two_snark,
     22,
-    halo2_kzg_config!(true, 1, (0..4 * LIMBS).map(|idx| (0, idx)).collect()),
+    halo2_kzg_config!(true, 1, Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())),
     kzg::halo2::Accumulation::two_snark()
 );
 test!(
@@ -120,6 +133,6 @@ test!(
     #[ignore = "cause it requires 32GB memory to run"],
     zk_accumulation_two_snark_with_accumulator,
     22,
-    halo2_kzg_config!(true, 1, (0..4 * LIMBS).map(|idx| (0, idx)).collect()),
+    halo2_kzg_config!(true, 1, Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())),
     kzg::halo2::Accumulation::two_snark_with_accumulator()
 );

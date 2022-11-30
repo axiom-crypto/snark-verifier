@@ -60,7 +60,15 @@ mod native {
         ) -> bool {
             !accumulators
                 .into_iter()
-                .any(|accumulator| !Self::decide(dk, accumulator))
+                //.enumerate()
+                .any(|accumulator| {
+                    /*let decide = Self::decide(dk, accumulator);
+                    if !decide {
+                        panic!("{i}");
+                    }
+                    !decide*/
+                    !Self::decide(dk, accumulator)
+                })
         }
     }
 }
@@ -144,7 +152,7 @@ mod evm {
 
                 let powers_of_challenge = LoadedScalar::<M::Scalar>::powers(&challenge, lhs.len());
                 let [lhs, rhs] = [lhs, rhs].map(|msms| {
-                    msms.into_iter()
+                    msms.iter()
                         .zip(powers_of_challenge.iter())
                         .map(|(msm, power_of_challenge)| {
                             Msm::<M::G1Affine, Rc<EvmLoader>>::base(msm) * power_of_challenge

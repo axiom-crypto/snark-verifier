@@ -8,6 +8,7 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
+use crate::halo2_curves;
 pub use halo2_curves::{
     group::{
         ff::{BatchInvert, Field, PrimeField},
@@ -122,8 +123,8 @@ impl<F: PrimeField> Domain<F> {
     pub fn rotate_scalar(&self, scalar: F, rotation: Rotation) -> F {
         match rotation.0.cmp(&0) {
             Ordering::Equal => scalar,
-            Ordering::Greater => scalar * self.gen.pow_vartime(&[rotation.0 as u64]),
-            Ordering::Less => scalar * self.gen_inv.pow_vartime(&[(-rotation.0) as u64]),
+            Ordering::Greater => scalar * self.gen.pow_vartime([rotation.0 as u64]),
+            Ordering::Less => scalar * self.gen_inv.pow_vartime([(-rotation.0) as u64]),
         }
     }
 }
@@ -170,17 +171,21 @@ impl<T: FieldOps + Clone> Fraction<T> {
 
         self.eval = Some(
             self.numer
-                .as_ref()
-                .map(|numer| numer.clone() * &self.denom)
+                .take()
+                .map(|numer| numer * &self.denom)
                 .unwrap_or_else(|| self.denom.clone()),
         );
     }
 
     pub fn evaluated(&self) -> &T {
-        assert!(self.inv);
+        assert!(self.eval.is_some());
 
         self.eval.as_ref().unwrap()
     }
+}
+
+pub fn ilog2(value: usize) -> usize {
+    (usize::BITS - value.leading_zeros() - 1) as usize
 }
 
 pub fn modulus<F: PrimeField>() -> BigUint {
@@ -221,19 +226,24 @@ pub fn fe_to_limbs<F1: PrimeField, F2: PrimeField, const LIMBS: usize, const BIT
     fe: F1,
 ) -> [F2; LIMBS] {
     let big = BigUint::from_bytes_le(fe.to_repr().as_ref());
-    let mask = (BigUint::one() << BITS) - 1usize;
+    let mask = &((BigUint::one() << BITS) - 1usize);
     (0usize..)
         .step_by(BITS)
         .take(LIMBS)
-        .map(move |shift| fe_from_big((&big >> shift) & &mask))
+        .map(|shift| fe_from_big((&big >> shift) & mask))
         .collect_vec()
         .try_into()
         .unwrap()
 }
 
-pub fn powers<F>(scalar: F) -> impl Iterator<Item = F>
-where
-    for<'a> F: Mul<&'a F, Output = F> + One + Clone,
-{
-    iter::successors(Some(F::one()), move |power| Some(scalar.clone() * power))
+pub fn powers<F: Field>(scalar: F) -> impl Iterator<Item = F> {
+    iter::successors(Some(F::one()), move |power| Some(scalar * power))
+}
+
+pub fn inner_product<F: Field>(lhs: &[F], rhs: &[F]) -> F {
+    lhs.iter()
+        .zip_eq(rhs.iter())
+        .map(|(lhs, rhs)| *lhs * rhs)
+        .reduce(|acc, product| acc + product)
+        .unwrap_or_default()
 }

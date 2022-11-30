@@ -29,7 +29,7 @@ where
 
     fn read_proof<T>(
         svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         transcript: &mut T,
     ) -> Result<Self::Proof, Error>
@@ -41,7 +41,7 @@ where
 
     fn succinct_verify(
         svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<Vec<MOS::Accumulator>, Error> {
@@ -52,7 +52,7 @@ where
                 &proof.z,
             );
 
-            L::LoadedScalar::batch_invert(common_poly_eval.denoms());
+            L::batch_invert(common_poly_eval.denoms());
             common_poly_eval.evaluate();
 
             common_poly_eval
@@ -63,47 +63,6 @@ where
         let queries = proof.queries(protocol, evaluations);
 
         let accumulator = MOS::succinct_verify(svk, &commitments, &proof.z, &queries, &proof.pcs)?;
-
-        let accumulators = iter::empty()
-            .chain(Some(accumulator))
-            .chain(proof.old_accumulators.iter().cloned())
-            .collect();
-
-        Ok(accumulators)
-    }
-
-    fn succinct_verify_or_dummy(
-        svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
-        instances: &[Vec<L::LoadedScalar>],
-        proof: &Self::Proof,
-        use_dummy: &L::LoadedScalar,
-    ) -> Result<Vec<MOS::Accumulator>, Error> {
-        let common_poly_eval = {
-            let mut common_poly_eval = CommonPolynomialEvaluation::new(
-                &protocol.domain,
-                langranges(protocol, instances),
-                &proof.z,
-            );
-
-            L::LoadedScalar::batch_invert(common_poly_eval.denoms());
-            common_poly_eval.evaluate();
-
-            common_poly_eval
-        };
-
-        let mut evaluations = proof.evaluations(protocol, instances, &common_poly_eval)?;
-        let commitments = proof.commitments(protocol, &common_poly_eval, &mut evaluations)?;
-        let queries = proof.queries(protocol, evaluations);
-
-        let accumulator = MOS::succinct_verify_or_dummy(
-            svk,
-            &commitments,
-            &proof.z,
-            &queries,
-            &proof.pcs,
-            use_dummy,
-        )?;
 
         let accumulators = iter::empty()
             .chain(Some(accumulator))
@@ -137,9 +96,9 @@ where
     L: Loader<C>,
     MOS: MultiOpenScheme<C, L>,
 {
-    fn read<T, AE>(
+    pub fn read<T, AE>(
         svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         transcript: &mut T,
     ) -> Result<Self, Error>
@@ -147,18 +106,30 @@ where
         T: TranscriptRead<C, L>,
         AE: AccumulatorEncoding<C, L, MOS>,
     {
-        if protocol.num_instance != instances.iter().map(|instances| instances.len()).collect_vec()
+        if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
+            transcript.common_scalar(transcript_initial_state)?;
+        }
+
+        if protocol.num_instance
+            != instances
+                .iter()
+                .map(|instances| instances.len())
+                .collect_vec()
         {
             return Err(Error::InvalidInstances);
         }
 
         let committed_instances = if let Some(ick) = &protocol.instance_committing_key {
-            // this case is synonymous with KZG_QUERY_INSTANCE = true
             let loader = transcript.loader();
-            let bases =
-                ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
-            // constant not used in kzg:
-            // let constant = ick.constant.as_ref().map(|value| loader.ec_point_load_const(value));
+            let bases = ick
+                .bases
+                .iter()
+                .map(|value| loader.ec_point_load_const(value))
+                .collect_vec();
+            let constant = ick
+                .constant
+                .as_ref()
+                .map(|value| loader.ec_point_load_const(value));
 
             let committed_instances = instances
                 .iter()
@@ -166,29 +137,18 @@ where
                     instances
                         .iter()
                         .zip(bases.iter())
-                        .map(|(scalar, base)| Msm::<C, L>::base(base.clone()) * scalar)
-                        // .chain(constant.clone().map(|constant| Msm::base(constant)))
+                        .map(|(scalar, base)| Msm::<C, L>::base(base) * scalar)
+                        .chain(constant.as_ref().map(Msm::base))
                         .sum::<Msm<_, _>>()
                         .evaluate(None)
                 })
                 .collect_vec();
-
-            // For EvmTranscript we need to hash in vk here so that the buffer is reset after the above MSMs
-            if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
-                transcript.common_scalar(&loader.load_const(transcript_initial_state))?;
-            }
-
             for committed_instance in committed_instances.iter() {
                 transcript.common_ec_point(committed_instance)?;
             }
 
             Some(committed_instances)
         } else {
-            if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
-                transcript
-                    .common_scalar(&transcript.loader().load_const(transcript_initial_state))?;
-            }
-
             for instances in instances.iter() {
                 for instance in instances.iter() {
                     transcript.common_scalar(instance)?;
@@ -204,7 +164,10 @@ where
                 .iter()
                 .zip(protocol.num_challenge.iter())
                 .map(|(&n, &m)| {
-                    Ok((transcript.read_n_ec_points(n)?, transcript.squeeze_n_challenges(m)))
+                    Ok((
+                        transcript.read_n_ec_points(n)?,
+                        transcript.squeeze_n_challenges(m),
+                    ))
                 })
                 .collect::<Result<Vec<_>, Error>>()?
                 .into_iter()
@@ -227,9 +190,13 @@ where
             .accumulator_indices
             .iter()
             .map(|accumulator_indices| {
-                accumulator_indices.iter().map(|&(i, j)| instances[i][j].clone()).collect()
+                AE::from_repr(
+                    &accumulator_indices
+                        .iter()
+                        .map(|&(i, j)| &instances[i][j])
+                        .collect_vec(),
+                )
             })
-            .map(AE::from_repr)
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
@@ -244,13 +211,15 @@ where
         })
     }
 
-    fn empty_queries(protocol: &Protocol<C>) -> Vec<pcs::Query<C::Scalar>> {
+    pub fn empty_queries(protocol: &Protocol<C, L>) -> Vec<pcs::Query<C::Scalar>> {
         protocol
             .queries
             .iter()
             .map(|query| pcs::Query {
                 poly: query.poly,
-                shift: protocol.domain.rotate_scalar(C::Scalar::one(), query.rotation),
+                shift: protocol
+                    .domain
+                    .rotate_scalar(C::Scalar::one(), query.rotation),
                 eval: (),
             })
             .collect()
@@ -258,35 +227,35 @@ where
 
     fn queries(
         &self,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         mut evaluations: HashMap<Query, L::LoadedScalar>,
     ) -> Vec<pcs::Query<C::Scalar, L::LoadedScalar>> {
         Self::empty_queries(protocol)
             .into_iter()
-            .zip(protocol.queries.iter().map(|query| evaluations.remove(query).unwrap()))
+            .zip(
+                protocol
+                    .queries
+                    .iter()
+                    .map(|query| evaluations.remove(query).unwrap()),
+            )
             .map(|(query, eval)| query.with_evaluation(eval))
             .collect()
     }
 
-    fn commitments(
-        &self,
-        protocol: &Protocol<C>,
+    fn commitments<'a>(
+        &'a self,
+        protocol: &'a Protocol<C, L>,
         common_poly_eval: &CommonPolynomialEvaluation<C, L>,
         evaluations: &mut HashMap<Query, L::LoadedScalar>,
     ) -> Result<Vec<Msm<C, L>>, Error> {
         let loader = common_poly_eval.zn().loader();
         let mut commitments = iter::empty()
-            .chain(
-                protocol
-                    .preprocessed
-                    .iter()
-                    .map(|value| Msm::base(loader.ec_point_load_const(value))),
-            )
+            .chain(protocol.preprocessed.iter().map(Msm::base))
             .chain(
                 self.committed_instances
-                    .clone()
+                    .as_ref()
                     .map(|committed_instances| {
-                        committed_instances.into_iter().map(Msm::base).collect_vec()
+                        committed_instances.iter().map(Msm::base).collect_vec()
                     })
                     .unwrap_or_else(|| {
                         iter::repeat_with(Default::default)
@@ -294,7 +263,7 @@ where
                             .collect_vec()
                     }),
             )
-            .chain(self.witnesses.iter().cloned().map(Msm::base))
+            .chain(self.witnesses.iter().map(Msm::base))
             .collect_vec();
 
         let numerator = protocol.quotient.numerator.evaluate(
@@ -341,7 +310,7 @@ where
             .pow_const(protocol.quotient.chunk_degree as u64)
             .powers(self.quotients.len())
             .into_iter()
-            .zip(self.quotients.iter().cloned().map(Msm::base))
+            .zip(self.quotients.iter().map(Msm::base))
             .map(|(coeff, chunk)| chunk * &coeff)
             .sum::<Msm<_, _>>();
         match protocol.linearization {
@@ -361,13 +330,18 @@ where
                 let (msm, constant) =
                     (numerator - quotient * common_poly_eval.zn_minus_one()).split();
                 commitments.push(msm);
-                evaluations.insert(quotient_query, constant.unwrap_or_else(|| loader.load_zero()));
+                evaluations.insert(
+                    quotient_query,
+                    constant.unwrap_or_else(|| loader.load_zero()),
+                );
             }
             None => {
                 commitments.push(quotient);
                 evaluations.insert(
                     quotient_query,
-                    numerator.try_into_constant().ok_or(Error::InvalidLinearization)?
+                    numerator
+                        .try_into_constant()
+                        .ok_or(Error::InvalidLinearization)?
                         * common_poly_eval.zn_minus_one_inv(),
                 );
             }
@@ -378,7 +352,7 @@ where
 
     fn evaluations(
         &self,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         common_poly_eval: &CommonPolynomialEvaluation<C, L>,
     ) -> Result<HashMap<Query, L::LoadedScalar>, Error> {
@@ -407,7 +381,13 @@ where
 
         let evals = iter::empty()
             .chain(instance_evals.into_iter().flatten())
-            .chain(protocol.evaluations.iter().cloned().zip(self.evaluations.iter().cloned()))
+            .chain(
+                protocol
+                    .evaluations
+                    .iter()
+                    .cloned()
+                    .zip(self.evaluations.iter().cloned()),
+            )
             .collect();
 
         Ok(evals)
@@ -439,9 +419,13 @@ where
     }
 }
 
-fn langranges<C, T>(protocol: &Protocol<C>, instances: &[Vec<T>]) -> impl IntoIterator<Item = i32>
+fn langranges<C, L>(
+    protocol: &Protocol<C, L>,
+    instances: &[Vec<L::LoadedScalar>],
+) -> impl IntoIterator<Item = i32>
 where
     C: CurveAffine,
+    L: Loader<C>,
 {
     let instance_eval_lagrange = protocol.instance_committing_key.is_none().then(|| {
         let queries = {
@@ -464,7 +448,7 @@ where
             }
         });
         let max_instance_len =
-            instances.iter().map(|instance| instance.len()).max().unwrap_or_default();
+            Iterator::max(instances.iter().map(|instance| instance.len())).unwrap_or_default();
         -max_rotation..max_instance_len as i32 + min_rotation.abs()
     });
     protocol

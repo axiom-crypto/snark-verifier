@@ -1,3 +1,8 @@
+use crate::halo2_proofs::{
+    plonk::{self, Any, ConstraintSystem, FirstPhase, SecondPhase, ThirdPhase, VerifyingKey},
+    poly::{self, commitment::Params},
+    transcript::{EncodedChallenge, Transcript},
+};
 use crate::{
     util::{
         arithmetic::{root_of_unity, CurveAffine, Domain, FieldExt, Rotation},
@@ -8,34 +13,14 @@ use crate::{
     },
     Protocol,
 };
-use halo2_curves::bn256::{Fq, Fr};
-use halo2_proofs::{
-    plonk::{
-        self, Any, Column, ConstraintSystem, FirstPhase, Instance, SecondPhase, ThirdPhase,
-        VerifyingKey,
-    },
-    poly::{
-        self,
-        commitment::{Params, ParamsProver},
-    },
-    transcript::{EncodedChallenge, Transcript},
-};
-use serde::{Deserialize, Serialize};
-use std::{
-    fs::{self, File},
-    io::{self, BufReader, BufWriter},
-    iter,
-    mem::size_of,
-};
+use num_integer::Integer;
+use std::{io, iter, mem::size_of};
 
-pub mod aggregation;
+// pub mod strategy;
 pub mod transcript;
 
-pub const LIMBS: usize = 3;
-pub const BITS: usize = 88;
-
 #[cfg(test)]
-mod test;
+pub(crate) mod test;
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -47,8 +32,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn kzg(query_instance: bool) -> Self {
-        Self { zk: true, query_instance, num_proof: 1, ..Default::default() }
+    pub fn kzg() -> Self {
+        Self { zk: true, query_instance: false, num_proof: 1, ..Default::default() }
     }
 
     pub fn ipa() -> Self {
@@ -57,6 +42,11 @@ impl Config {
 
     pub fn set_zk(mut self, zk: bool) -> Self {
         self.zk = zk;
+        self
+    }
+
+    pub fn set_query_instance(mut self, query_instance: bool) -> Self {
+        self.query_instance = query_instance;
         self
     }
 
@@ -71,8 +61,11 @@ impl Config {
         self
     }
 
-    pub fn with_accumulator_indices(mut self, accumulator_indices: Vec<(usize, usize)>) -> Self {
-        self.accumulator_indices = Some(accumulator_indices);
+    pub fn with_accumulator_indices(
+        mut self,
+        accumulator_indices: Option<Vec<(usize, usize)>>,
+    ) -> Self {
+        self.accumulator_indices = accumulator_indices;
         self
     }
 }
@@ -82,11 +75,13 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
     vk: &VerifyingKey<C>,
     config: Config,
 ) -> Protocol<C> {
+    assert_eq!(vk.get_domain().k(), params.k());
+
     let cs = vk.cs();
     let Config { zk, query_instance, num_proof, num_instance, accumulator_indices } = config;
 
-    let k = vk.get_domain().empty_lagrange().len().ilog2();
-    let domain = Domain::new(k as usize, root_of_unity(k as usize));
+    let k = params.k() as usize;
+    let domain = Domain::new(k, root_of_unity(k));
 
     let preprocessed = vk
         .fixed_commitments()
@@ -191,7 +186,7 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
             degree - 1
         };
 
-        let num_phase = *cs.advice_column_phase().iter().max().unwrap() as usize + 1;
+        let num_phase = *cs.advice_column_phase().iter().max().unwrap_or(&0) as usize + 1;
         let remapping = |phase: Vec<u8>| {
             let num = phase.iter().fold(vec![0; num_phase], |mut num, phase| {
                 num[*phase as usize] += 1;
@@ -227,11 +222,10 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
             challenge_index,
             num_lookup_permuted: 2 * cs.lookups().len(),
             permutation_chunk_size,
-            num_permutation_z: cs
-                .permutation()
-                .get_columns()
-                .len()
-                .div_ceil(permutation_chunk_size),
+            num_permutation_z: Integer::div_ceil(
+                &cs.permutation().get_columns().len(),
+                &permutation_chunk_size,
+            ),
             num_lookup_z: cs.lookups().len(),
         }
     }
@@ -545,27 +539,30 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
                     .zip(polys.chunks(self.permutation_chunk_size))
                     .zip(permutation_fixeds.chunks(self.permutation_chunk_size))
                     .enumerate()
-                    .map(|(i, ((((z, z_w, _), (_, z_next_w, _)), polys), permutation_fixeds))| {
-                        let left = if self.zk || zs.len() == 1 {
-                            z_w.clone()
-                        } else {
-                            z_w + l_last * (z_next_w - z_w)
-                        } * polys
-                            .iter()
-                            .zip(permutation_fixeds.iter())
-                            .map(|(poly, permutation_fixed)| {
-                                poly + beta * permutation_fixed + gamma
-                            })
-                            .reduce(|acc, expr| acc * expr)
-                            .unwrap();
-                        let right =
-                            z * polys
+                    .map(
+                        |(
+                            i,
+                            ((((z, z_omega, _), (_, z_next_omega, _)), polys), permutation_fixeds),
+                        )| {
+                            let left = if self.zk || zs.len() == 1 {
+                                z_omega.clone()
+                            } else {
+                                z_omega + l_last * (z_next_omega - z_omega)
+                            } * polys
+                                .iter()
+                                .zip(permutation_fixeds.iter())
+                                .map(|(poly, permutation_fixed)| {
+                                    poly + beta * permutation_fixed + gamma
+                                })
+                                .reduce(|acc, expr| acc * expr)
+                                .unwrap();
+                            let right = z * polys
                                 .iter()
                                 .zip(
                                     iter::successors(
-                                        Some(F::DELTA.pow_vartime(&[(i
-                                            * self.permutation_chunk_size)
-                                            as u64])),
+                                        Some(F::DELTA.pow_vartime([
+                                            (i * self.permutation_chunk_size) as u64,
+                                        ])),
                                         |delta| Some(F::DELTA * delta),
                                     )
                                     .map(Expression::Constant),
@@ -573,12 +570,13 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
                                 .map(|(poly, delta)| poly + beta * delta * identity + gamma)
                                 .reduce(|acc, expr| acc * expr)
                                 .unwrap();
-                        if self.zk {
-                            l_active * (left - right)
-                        } else {
-                            left - right
-                        }
-                    }),
+                            if self.zk {
+                                l_active * (left - right)
+                            } else {
+                                left - right
+                            }
+                        },
+                    ),
             )
             .collect_vec()
     }
@@ -615,29 +613,35 @@ impl<'a, F: FieldExt> Polynomials<'a, F> {
             .lookups()
             .iter()
             .zip(polys.iter())
-            .flat_map(|(lookup, (z, z_w, permuted_input, permuted_input_w_inv, permuted_table))| {
-                let input = compress(lookup.input_expressions());
-                let table = compress(lookup.table_expressions());
-                iter::empty()
-                    .chain(Some(l_0 * (one - z)))
-                    .chain(self.zk.then(|| l_last * (z * z - z)))
-                    .chain(Some(if self.zk {
-                        l_active
-                            * (z_w * (permuted_input + beta) * (permuted_table + gamma)
-                                - z * (input + beta) * (table + gamma))
-                    } else {
-                        z_w * (permuted_input + beta) * (permuted_table + gamma)
-                            - z * (input + beta) * (table + gamma)
-                    }))
-                    .chain(self.zk.then(|| l_0 * (permuted_input - permuted_table)))
-                    .chain(Some(if self.zk {
-                        l_active
-                            * (permuted_input - permuted_table)
-                            * (permuted_input - permuted_input_w_inv)
-                    } else {
-                        (permuted_input - permuted_table) * (permuted_input - permuted_input_w_inv)
-                    }))
-            })
+            .flat_map(
+                |(
+                    lookup,
+                    (z, z_omega, permuted_input, permuted_input_omega_inv, permuted_table),
+                )| {
+                    let input = compress(lookup.input_expressions());
+                    let table = compress(lookup.table_expressions());
+                    iter::empty()
+                        .chain(Some(l_0 * (one - z)))
+                        .chain(self.zk.then(|| l_last * (z * z - z)))
+                        .chain(Some(if self.zk {
+                            l_active
+                                * (z_omega * (permuted_input + beta) * (permuted_table + gamma)
+                                    - z * (input + beta) * (table + gamma))
+                        } else {
+                            z_omega * (permuted_input + beta) * (permuted_table + gamma)
+                                - z * (input + beta) * (table + gamma)
+                        }))
+                        .chain(self.zk.then(|| l_0 * (permuted_input - permuted_table)))
+                        .chain(Some(if self.zk {
+                            l_active
+                                * (permuted_input - permuted_table)
+                                * (permuted_input - permuted_input_omega_inv)
+                        } else {
+                            (permuted_input - permuted_table)
+                                * (permuted_input - permuted_input_omega_inv)
+                        }))
+                },
+            )
             .collect_vec()
     }
 
@@ -740,75 +744,4 @@ fn instance_committing_key<'a, C: CurveAffine, P: Params<'a, C>>(
     };
 
     InstanceCommittingKey { bases, constant: Some(w) }
-}
-
-// for tuning the circuit
-#[derive(Serialize, Deserialize)]
-pub struct Halo2VerifierCircuitConfigParams {
-    pub strategy: halo2_ecc::fields::fp::FpStrategy,
-    pub degree: u32,
-    pub num_advice: usize,
-    pub num_lookup_advice: usize,
-    pub num_fixed: usize,
-    pub lookup_bits: usize,
-    pub limb_bits: usize,
-    pub num_limbs: usize,
-}
-
-#[derive(Clone)]
-pub struct Halo2VerifierCircuitConfig {
-    pub base_field_config: halo2_ecc::fields::fp::FpConfig<Fr, Fq>,
-    pub instance: Column<Instance>,
-}
-
-impl Halo2VerifierCircuitConfig {
-    pub fn configure(
-        meta: &mut ConstraintSystem<Fr>,
-        params: Halo2VerifierCircuitConfigParams,
-    ) -> Self {
-        assert!(
-            params.limb_bits == BITS && params.num_limbs == LIMBS,
-            "For now we fix limb_bits = {}, otherwise change code",
-            BITS
-        );
-        let base_field_config = halo2_ecc::fields::fp::FpConfig::configure(
-            meta,
-            params.strategy,
-            &[params.num_advice],
-            &[params.num_lookup_advice],
-            params.num_fixed,
-            params.lookup_bits,
-            params.limb_bits,
-            params.num_limbs,
-            halo2_base::utils::modulus::<Fq>(),
-            "verifier".to_string(),
-        );
-
-        let instance = meta.instance_column();
-        meta.enable_equality(instance);
-
-        Self { base_field_config, instance }
-    }
-}
-
-pub fn read_or_create_srs<'a, C: CurveAffine, P: ParamsProver<'a, C>>(
-    k: u32,
-    setup: impl Fn(u32) -> P,
-) -> P {
-    let dir = "./params";
-    let path = format!("{}/kzg_bn254_{}.srs", dir, k);
-    match fs::File::open(path.as_str()) {
-        Ok(f) => {
-            println!("read params from {}", path);
-            let mut reader = BufReader::new(f);
-            P::read(&mut reader).unwrap()
-        }
-        Err(_) => {
-            println!("creating params for {}", k);
-            fs::create_dir_all(dir).unwrap();
-            let params = setup(k);
-            params.write(&mut BufWriter::new(File::create(path).unwrap())).unwrap();
-            params
-        }
-    }
 }

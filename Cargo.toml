@@ -6,62 +6,97 @@ edition = "2021"
 [dependencies]
 itertools = "0.10.3"
 lazy_static = "1.4.0"
-num-bigint = "0.4"
-num-traits = "0.2"
-
+num-bigint = "0.4.3"
+num-integer = "0.1.45"
+num-traits = "0.2.15"
 rand = "0.8"
-rand_chacha = "0.3.1"
+hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json  = "1.0"
-hex = "0.4.3"
-ark-std = { version = "0.3", features = ["print-trace"] }
 
-halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.0", package = "halo2curves" }
+# Use halo2_base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
+halo2_base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_base", default-features = false }
 
-# system_halo2
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2022_10_22", optional = true }
+# parallel
+rayon = { version = "1.5.3", optional = true }
 
 # loader_evm
-ethereum_types = { package = "ethereum-types", version = "0.13.1", default-features = false, features = ["std"], optional = true }
-sha3 = { version = "0.10.1", optional = true }
-foundry_evm = { git = "https://github.com/jonathanpwang/foundry", package = "foundry-evm", branch = "fix/pin-revm-to-rev", optional = true }
+ethereum_types = { package = "ethereum-types", version = "0.14", default-features = false, features = ["std"], optional = true }
+sha3 = { version = "0.10", optional = true }
+revm = { version = "2.3.1", optional = true }
+bytes = { version = "1.2", optional = true }
+rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
 
 # loader_halo2
-halo2_base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_base", default-features = false, optional = true }
-halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", package = "halo2_ecc", default-features = false, optional = true }
-poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", tag = "v2022_10_22", optional = true }
+halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_ecc", default-features = false, optional = true }
+
+# zkevm benchmarks
+zkevm_circuit_benchmarks = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "circuit-benchmarks", features = ["benches"], optional = true }
+zkevm_circuits = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "zkevm-circuits", optional = true }
 
 [dev-dependencies]
+ark-std = { version = "0.3.0", features = ["print-trace"] }
+rand_chacha = "0.3.1"
 paste = "1.0.7"
 
-# loader_evm
-crossterm = { version = "0.22.1" }
-tui = { version = "0.16.0", default-features = false, features = ["crossterm"] }
+# system_halo2
+halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_ecc", default-features = false }
 
-# zkevm
-zkevm_circuit_benchmarks = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "circuit-benchmarks", features = ["benches"] }
-zkevm_circuits = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "zkevm-circuits" }
+# loader_evm
+crossterm = { version = "0.25" }
+tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = ["loader_evm", "loader_halo2", "system_halo2", "display", "serialize"]
-loader_evm = ["dep:ethereum_types", "dep:sha3", "dep:foundry_evm"]
-loader_halo2 = ["dep:halo2_proofs", "dep:halo2_base", "halo2_ecc", "dep:poseidon"]
-system_halo2 = ["dep:halo2_proofs"]
-display = ["halo2_ecc/display"]
-serialize = []
-sanity_check = []
+default = ["loader_evm", "loader_halo2", "system_halo2", "halo2-axiom", "display"]
+display = ["halo2_base/display", "halo2_ecc?/display"]
+# EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
+halo2-pse = ["halo2_base/halo2-pse", "halo2_ecc?/halo2-pse"]
+halo2-axiom = ["halo2_base/halo2-axiom", "halo2_ecc?/halo2-axiom"]
 
-[patch."https://github.com/privacy-scaling-explorations/halo2"]
-halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization", package = "halo2_proofs" }
- 
+parallel = ["dep:rayon"]
+
+loader_evm = ["dep:ethereum_types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
+loader_halo2 = ["halo2_ecc"]
+system_halo2 = []
+
+zkevm = ["dep:zkevm_circuit_benchmarks", "dep:zkevm_circuits"]
+
 [[example]]
 name = "evm-verifier"
 required-features = ["loader_evm", "system_halo2"]
 
 [[example]]
 name = "evm-verifier-with-accumulator"
-required-features = ["loader_halo2", "loader_evm", "system_halo2"]
+required-features = ["loader_halo2", "system_halo2", "loader_evm"]
 
 [[example]]
 name = "recursion"
 required-features = ["loader_halo2", "system_halo2"]
+
+[profile.dev]
+opt-level = 3
+
+# Local "release" mode, more optimized than dev but much faster to compile than release
+[profile.local]
+inherits = "dev"
+opt-level = 3
+# Set this to 1 or 2 to get more useful backtraces
+debug = 0
+panic = 'unwind'
+# better recompile times
+incremental = true
+codegen-units = 16
+
+[profile.release]
+debug = 0
+opt-level = 3
+lto = "fat" 
+# codegen-units = 1
+panic = "abort"
+
+[patch."ssh://github.com/axiom-crypto/halo2-lib-working.git"]
+halo2_base = { path = "../halo2-lib-working/halo2_base" }
+halo2_ecc = { path = "../halo2-lib-working/halo2_ecc" }
+
+[patch."https://github.com/privacy-scaling-explorations/halo2curves.git"] 
+halo2curves = { path = "../halo2/arithmetic/curves" }

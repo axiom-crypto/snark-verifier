@@ -20,7 +20,7 @@ where
 
     fn read_proof<T>(
         svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         transcript: &mut T,
     ) -> Result<Self::Proof, Error>
@@ -29,31 +29,22 @@ where
 
     fn succinct_verify(
         svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         proof: &Self::Proof,
-    ) -> Result<Vec<MOS::Accumulator>, Error>;
-
-    fn succinct_verify_or_dummy(
-        svk: &MOS::SuccinctVerifyingKey,
-        protocol: &Protocol<C>,
-        instances: &[Vec<L::LoadedScalar>],
-        proof: &Self::Proof,
-        use_dummy: &L::LoadedScalar,
     ) -> Result<Vec<MOS::Accumulator>, Error>;
 
     fn verify(
         svk: &MOS::SuccinctVerifyingKey,
         dk: &MOS::DecidingKey,
-        protocol: &Protocol<C>,
+        protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<MOS::Output, Error>
     where
         MOS: Decider<C, L>,
     {
-        let accumulators = Self::succinct_verify(svk, protocol, instances, proof)
-            .expect("succinct verify should not fail");
+        let accumulators = Self::succinct_verify(svk, protocol, instances, proof)?;
         let output = MOS::decide_all(dk, accumulators);
         Ok(output)
     }

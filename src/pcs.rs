@@ -10,6 +10,7 @@ use crate::{
 use rand::Rng;
 use std::fmt::Debug;
 
+// pub mod ipa;
 pub mod kzg;
 
 pub trait PolynomialCommitmentScheme<C, L>: Clone + Debug
@@ -56,19 +57,6 @@ where
         queries: &[Query<C::Scalar, L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<Self::Accumulator, Error>;
-
-    // same as succinct_verify except `use_dummy` is boolean loaded scalar
-    // if `use_dummy` is 1, then put in dummy values to MSM so constraints are satisfies regardless of `proof` values
-    fn succinct_verify_or_dummy(
-        _svk: &Self::SuccinctVerifyingKey,
-        _commitments: &[Msm<C, L>],
-        _point: &L::LoadedScalar,
-        _queries: &[Query<C::Scalar, L::LoadedScalar>],
-        _proof: &Self::Proof,
-        _use_dummy: &L::LoadedScalar,
-    ) -> Result<Self::Accumulator, Error> {
-        todo!()
-    }
 }
 
 pub trait Decider<C, L>: PolynomialCommitmentScheme<C, L>
@@ -132,7 +120,7 @@ where
     L: Loader<C>,
     PCS: PolynomialCommitmentScheme<C, L>,
 {
-    fn from_repr(repr: Vec<L::LoadedScalar>) -> Result<PCS::Accumulator, Error>;
+    fn from_repr(repr: &[&L::LoadedScalar]) -> Result<PCS::Accumulator, Error>;
 }
 
 impl<C, L, PCS> AccumulatorEncoding<C, L, PCS> for ()
@@ -141,7 +129,7 @@ where
     L: Loader<C>,
     PCS: PolynomialCommitmentScheme<C, L>,
 {
-    fn from_repr(_: Vec<L::LoadedScalar>) -> Result<PCS::Accumulator, Error> {
+    fn from_repr(_: &[&L::LoadedScalar]) -> Result<PCS::Accumulator, Error> {
         unimplemented!()
     }
 }
