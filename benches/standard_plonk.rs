@@ -1,13 +1,8 @@
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};
-use plonk_verifier::sdk::aggregation::AggregationCircuit;
-use plonk_verifier::sdk::{
-    self, gen_pk, gen_proof_shplonk, gen_snark_shplonk, PoseidonTranscript, POSEIDON_SPEC,
-};
 use pprof::criterion::{Output, PProfProfiler};
 
 use ark_std::{end_timer, start_timer};
-
 use halo2_base::halo2_proofs;
 use halo2_proofs::halo2curves as halo2_curves;
 use halo2_proofs::{
@@ -32,6 +27,10 @@ use plonk_verifier::{
         native::NativeLoader,
     },
     pcs::kzg::{Gwc19, Kzg, KzgAs, LimbsEncoding},
+    sdk::{
+        self, gen_pk, gen_proof_shplonk, gen_snark_shplonk, halo2::aggregation::AggregationCircuit,
+        PoseidonTranscript, POSEIDON_SPEC,
+    },
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, PlonkVerifier},
 };

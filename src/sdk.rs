@@ -6,8 +6,8 @@ use crate::{
     loader::native::NativeLoader,
     pcs,
     poseidon::Spec,
-    system::halo2::{self, compile, Config},
-    util::{hash, transcript::TranscriptWrite},
+    system::halo2::{compile, Config},
+    util::transcript::TranscriptWrite,
     verifier::PlonkProof,
     Protocol,
 };
@@ -47,7 +47,8 @@ use std::{
     path::Path,
 };
 
-pub mod aggregation;
+pub mod evm;
+pub mod halo2;
 
 // Poseidon parameters
 const T: usize = 5;
@@ -56,7 +57,7 @@ const R_F: usize = 8;
 const R_P: usize = 60;
 
 pub type PoseidonTranscript<L, S> =
-    halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+    crate::system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 lazy_static! {
     pub static ref POSEIDON_SPEC: Spec<Fr, T, RATE> = Spec::new(R_F, R_P);
 }

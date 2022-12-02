@@ -29,7 +29,7 @@ use std::{fs::File, rc::Rc};
 const LIMBS: usize = 3;
 const BITS: usize = 88;
 
-use super::{PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
+use crate::sdk::{PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
 
 type Svk = KzgSuccinctVerifyingKey<G1Affine>;
 type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
