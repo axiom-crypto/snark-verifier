@@ -59,6 +59,24 @@ where
         let buf = Poseidon::new(loader, R_F, R_P);
         Self { loader: loader.clone(), stream, buf }
     }
+
+    pub fn from_spec(
+        loader: &Rc<Halo2Loader<'a, C, EccChip>>,
+        stream: Value<R>,
+        spec: crate::poseidon::Spec<C::Scalar, T, RATE>,
+    ) -> Self {
+        let buf = Poseidon::from_spec(loader, spec);
+        Self { loader: loader.clone(), stream, buf }
+    }
+
+    pub fn clear(&mut self) {
+        self.buf.clear();
+    }
+
+    pub fn new_stream(&mut self, stream: Value<R>) {
+        self.buf.clear();
+        self.stream = stream;
+    }
 }
 
 impl<'a, C, R, EccChip, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize>
@@ -148,6 +166,19 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
 {
     pub fn new(stream: S) -> Self {
         Self { loader: NativeLoader, stream, buf: Poseidon::new(&NativeLoader, R_F, R_P) }
+    }
+
+    pub fn from_spec(stream: S, spec: crate::poseidon::Spec<C::Scalar, T, RATE>) -> Self {
+        Self { loader: NativeLoader, stream, buf: Poseidon::from_spec(&NativeLoader, spec) }
+    }
+
+    pub fn clear(&mut self) {
+        self.buf.clear();
+    }
+
+    pub fn new_stream(&mut self, stream: S) {
+        self.buf.clear();
+        self.stream = stream;
     }
 }
 

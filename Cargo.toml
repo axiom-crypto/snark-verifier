@@ -10,9 +10,12 @@ num-bigint = "0.4.3"
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 rand = "0.8"
+rand_chacha = "0.3.1"
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
-serde_json  = "1.0"
+serde_json = "1.0"
+bincode = "1.3.3"
+ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 
 # Use halo2_base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 halo2_base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_base", default-features = false }
@@ -36,8 +39,10 @@ zkevm_circuits = {git = "https://github.com/privacy-scaling-explorations/zkevm-c
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
-rand_chacha = "0.3.1"
 paste = "1.0.7"
+pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
+criterion = "0.4"
+criterion-macro = "0.4"
 
 # system_halo2
 halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_ecc", default-features = false }
@@ -47,8 +52,8 @@ crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = ["loader_evm", "loader_halo2", "system_halo2", "halo2-axiom", "display"]
-display = ["halo2_base/display", "halo2_ecc?/display"]
+default = ["loader_evm", "loader_halo2", "system_halo2", "halo2-axiom", "halo2_ecc/jemallocator"]
+display = ["halo2_base/display", "halo2_ecc?/display", "ark-std"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["halo2_base/halo2-pse", "halo2_ecc?/halo2-pse"]
 halo2-axiom = ["halo2_base/halo2-axiom", "halo2_ecc?/halo2-axiom"]
@@ -72,6 +77,11 @@ required-features = ["loader_halo2", "system_halo2", "loader_evm"]
 [[example]]
 name = "recursion"
 required-features = ["loader_halo2", "system_halo2"]
+
+[[bench]]
+name = "standard_plonk"
+required-features = ["loader_halo2", "system_halo2"]
+harness = false
 
 [profile.dev]
 opt-level = 3

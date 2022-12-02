@@ -5,6 +5,7 @@ use crate::{
 };
 use std::{iter, marker::PhantomData, mem};
 
+#[derive(Clone)]
 struct State<F: FieldExt, L, const T: usize, const RATE: usize> {
     inner: [L; T],
     _marker: PhantomData<F>,
@@ -83,19 +84,32 @@ impl<F: FieldExt, L: LoadedScalar<F>, const T: usize, const RATE: usize> State<F
 
 pub struct Poseidon<F: FieldExt, L, const T: usize, const RATE: usize> {
     spec: Spec<F, T, RATE>,
+    default_state: State<F, L, T, RATE>,
     state: State<F, L, T, RATE>,
     buf: Vec<L>,
 }
 
 impl<F: FieldExt, L: LoadedScalar<F>, const T: usize, const RATE: usize> Poseidon<F, L, T, RATE> {
     pub fn new(loader: &L::Loader, r_f: usize, r_p: usize) -> Self {
+        let default_state =
+            State::new(poseidon::State::default().words().map(|state| loader.load_const(&state)));
         Self {
             spec: Spec::new(r_f, r_p),
-            state: State::new(
-                poseidon::State::default().words().map(|state| loader.load_const(&state)),
-            ),
+            state: default_state.clone(),
+            default_state,
             buf: Vec::new(),
         }
+    }
+
+    pub fn from_spec(loader: &L::Loader, spec: Spec<F, T, RATE>) -> Self {
+        let default_state =
+            State::new(poseidon::State::default().words().map(|state| loader.load_const(&state)));
+        Self { spec, state: default_state.clone(), default_state, buf: Vec::new() }
+    }
+
+    pub fn clear(&mut self) {
+        self.state = self.default_state.clone();
+        self.buf.clear();
     }
 
     pub fn update(&mut self, elements: &[L]) {
