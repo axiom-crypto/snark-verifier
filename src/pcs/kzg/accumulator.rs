@@ -214,15 +214,15 @@ mod halo2 {
 
     mod halo2_lib {
         use super::*;
-        use halo2_base::{halo2_proofs::halo2curves::CurveAffineExt, utils::BigPrimeField};
+        use halo2_base::{halo2_proofs::halo2curves::CurveAffineExt, utils::PrimeField};
         use halo2_ecc::ecc::BaseFieldEccChip;
 
         impl<'a, C, const LIMBS: usize, const BITS: usize>
             LimbsEncodingInstructions<'a, C, LIMBS, BITS> for BaseFieldEccChip<C>
         where
             C: CurveAffineExt,
-            C::ScalarExt: BigPrimeField,
-            C::Base: BigPrimeField,
+            C::ScalarExt: PrimeField,
+            C::Base: PrimeField,
         {
             fn assign_ec_point_from_limbs(
                 &self,

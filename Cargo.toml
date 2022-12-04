@@ -34,8 +34,10 @@ rlp = { version = "0.5", default-features = false, features = ["std"], optional 
 halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_ecc", default-features = false, optional = true }
 
 # zkevm benchmarks
-zkevm_circuit_benchmarks = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "circuit-benchmarks", features = ["benches"], optional = true }
-zkevm_circuits = {git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", package = "zkevm-circuits", optional = true }
+zkevm-circuits = { path = "../zkevm-circuits/zkevm-circuits", features = ["test"], optional = true }
+bus-mapping = { path = "../zkevm-circuits/bus-mapping", optional = true }
+eth-types = { path = "../zkevm-circuits/eth-types", optional = true }
+mock = { path = "../zkevm-circuits/mock", optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
@@ -43,16 +45,12 @@ paste = "1.0.7"
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
 criterion = "0.4"
 criterion-macro = "0.4"
-
-# system_halo2
-halo2_ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", tag = "v0.2.1", package = "halo2_ecc", default-features = false }
-
 # loader_evm
 crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = ["loader_evm", "loader_halo2", "system_halo2", "halo2-axiom", "halo2_ecc/jemallocator"]
+default = ["loader_evm", "loader_halo2", "zkevm", "halo2-pse", "halo2_ecc?/jemallocator"]
 display = ["halo2_base/display", "halo2_ecc?/display", "ark-std"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["halo2_base/halo2-pse", "halo2_ecc?/halo2-pse"]
@@ -62,39 +60,45 @@ parallel = ["dep:rayon"]
 
 loader_evm = ["dep:ethereum_types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
 loader_halo2 = ["halo2_ecc"]
-system_halo2 = []
 
-zkevm = ["dep:zkevm_circuit_benchmarks", "dep:zkevm_circuits"]
+zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
 [[example]]
 name = "evm-verifier"
-required-features = ["loader_evm", "system_halo2"]
+required-features = ["loader_evm"]
 
 [[example]]
 name = "evm-verifier-with-accumulator"
-required-features = ["loader_halo2", "system_halo2", "loader_evm"]
+required-features = ["loader_halo2", "loader_evm"]
 
 [[example]]
 name = "recursion"
-required-features = ["loader_halo2", "system_halo2"]
+required-features = ["loader_halo2"]
 
 [[bench]]
 name = "standard_plonk"
-required-features = ["loader_halo2", "system_halo2"]
+required-features = ["loader_halo2"]
+harness = false
+
+[[bench]]
+name = "zkevm"
+required-features = ["loader_halo2", "zkevm", "halo2-pse"]
 harness = false
 
 [profile.dev]
 opt-level = 3
 
-# Local "release" mode, more optimized than dev but much faster to compile than release
+# Local "release" mode, more optimized than dev but faster to compile than release
 [profile.local]
 inherits = "dev"
 opt-level = 3
 # Set this to 1 or 2 to get more useful backtraces
-debug = 0
+debug = true
+debug-assertions = false
 panic = 'unwind'
 # better recompile times
 incremental = true
+lto = "thin"
 codegen-units = 16
 
 [profile.release]
@@ -104,9 +108,20 @@ lto = "fat"
 # codegen-units = 1
 panic = "abort"
 
+# For performance profiling
+[profile.flamegraph]
+inherits = "release"
+debug = true
+
 [patch."ssh://github.com/axiom-crypto/halo2-lib-working.git"]
 halo2_base = { path = "../halo2-lib-working/halo2_base" }
 halo2_ecc = { path = "../halo2-lib-working/halo2_ecc" }
 
 [patch."https://github.com/privacy-scaling-explorations/halo2curves.git"] 
 halo2curves = { path = "../halo2/arithmetic/curves" }
+
+[patch."https://github.com/privacy-scaling-explorations/halo2.git"]
+halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization" }
+
+[patch."https://github.com/scroll-tech/halo2.git"]
+halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization" }

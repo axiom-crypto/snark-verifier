@@ -6,38 +6,22 @@ use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
 use halo2_proofs::halo2curves as halo2_curves;
 use halo2_proofs::{
-    dev::MockProver,
-    halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ProvingKey, VerifyingKey},
-    poly::{
-        commitment::{Params, ParamsProver},
-        kzg::{
-            commitment::{KZGCommitmentScheme, ParamsKZG},
-            multiopen::{ProverGWC, VerifierGWC},
-            strategy::AccumulatorStrategy,
-        },
-        VerificationStrategy,
-    },
-    transcript::{EncodedChallenge, TranscriptReadBuffer, TranscriptWriterBuffer},
+    halo2curves::bn256::Bn256,
+    poly::{commitment::Params, kzg::commitment::ParamsKZG},
 };
-use itertools::Itertools;
 use plonk_verifier::{
-    loader::{
-        evm::{encode_calldata, EvmLoader, ExecutorBuilder},
-        native::NativeLoader,
-    },
-    pcs::kzg::{Gwc19, Kzg, KzgAs, LimbsEncoding},
+    loader::native::NativeLoader,
     sdk::{
-        self, gen_pk, gen_proof_shplonk, gen_snark_shplonk, halo2::aggregation::AggregationCircuit,
-        PoseidonTranscript, POSEIDON_SPEC,
+        self, gen_pk,
+        halo2::{
+            aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk,
+            PoseidonTranscript, POSEIDON_SPEC,
+        },
     },
-    system::halo2::{compile, transcript::evm::EvmTranscript, Config},
-    verifier::{self, PlonkVerifier},
 };
 use rand::rngs::OsRng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use std::{io::Cursor, rc::Rc};
 
 mod application {
     use super::halo2_curves::bn256::Fr;
@@ -213,7 +197,7 @@ fn gen_application_snark(
     let circuit = application::StandardPlonk::rand(OsRng);
 
     let pk = gen_pk(params, &circuit, None);
-    gen_snark_shplonk(params, &pk, circuit, transcript, None)
+    gen_snark_shplonk(params, &pk, circuit, transcript, &mut OsRng, None)
 }
 
 fn bench(c: &mut Criterion) {
@@ -245,7 +229,15 @@ fn bench(c: &mut Criterion) {
         |b, &(params, pk, agg_circuit)| {
             b.iter(|| {
                 let instances = agg_circuit.instances();
-                gen_proof_shplonk(params, pk, agg_circuit.clone(), instances, &mut transcript, None)
+                gen_proof_shplonk(
+                    params,
+                    pk,
+                    agg_circuit.clone(),
+                    instances,
+                    &mut transcript,
+                    &mut rng,
+                    None,
+                )
             })
         },
     );

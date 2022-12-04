@@ -20,6 +20,7 @@ use std::{io, iter, mem::size_of};
 pub mod transcript;
 
 #[cfg(test)]
+#[cfg(feature = "loader_halo2")]
 pub(crate) mod test;
 
 #[derive(Clone, Debug, Default)]

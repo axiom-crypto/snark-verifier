@@ -1,42 +1,43 @@
 use crate::halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use crate::halo2_proofs::{
-    circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
-    plonk::{self, Circuit, Column, ConstraintSystem, Instance},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
+    plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
-use crate::pcs::kzg::Bdfg21;
 use crate::{
     loader::{self, native::NativeLoader},
     pcs::{
-        kzg::{Kzg, KzgAccumulator, KzgAs, KzgSuccinctVerifyingKey, LimbsEncoding},
+        kzg::{Bdfg21, Kzg, KzgAccumulator, KzgAs, KzgSuccinctVerifyingKey},
         AccumulationScheme, AccumulationSchemeProver, MultiOpenScheme, PolynomialCommitmentScheme,
     },
-    system,
+    sdk::{Plonk, BITS, LIMBS},
     util::arithmetic::fe_to_limbs,
-    verifier::{self, PlonkVerifier},
-    Protocol,
+    verifier::PlonkVerifier,
 };
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
-use halo2_base::{AssignedValue, Context, ContextParams};
+use halo2_base::{Context, ContextParams};
 use halo2_ecc::ecc::EccChip;
 use itertools::Itertools;
-use rand::rngs::OsRng;
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha20Rng;
+use rand::Rng;
 use std::{fs::File, rc::Rc};
 
-const LIMBS: usize = 3;
-const BITS: usize = 88;
-
-use crate::sdk::{PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
+use super::{CircuitExt, PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
 
 type Svk = KzgSuccinctVerifyingKey<G1Affine>;
 type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
 type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
-/// PCS be either `Kzg<Bn256, Gwc19>` or `Kzg<Bn256, Bdfg21>`
-type Plonk<PCS> = verifier::Plonk<PCS, LimbsEncoding<LIMBS, BITS>>;
 type Shplonk = Plonk<Kzg<Bn256, Bdfg21>>;
+
+pub fn load_verify_circuit_degree() -> u32 {
+    let path = std::env::var("VERIFY_CONFIG")
+        .unwrap_or_else(|_| "./configs/verify_circuit.config".to_string());
+    let params: AggregationConfigParams = serde_json::from_reader(
+        File::open(path.as_str()).unwrap_or_else(|_| panic!("{path} does not exist")),
+    )
+    .unwrap();
+    params.degree
+}
 
 /// Core function used in `synthesize` to aggregate multiple `snarks`.
 ///  
@@ -95,7 +96,7 @@ where
         })
         .collect_vec();
 
-    let acccumulator = if accumulators.len() > 1 {
+    let accumulator = if accumulators.len() > 1 {
         transcript.new_stream(as_proof);
         let proof =
             KzgAs::<PCS>::read_proof(&Default::default(), &accumulators, &mut transcript).unwrap();
@@ -104,7 +105,7 @@ where
         accumulators.pop().unwrap()
     };
 
-    (previous_instances, acccumulator)
+    (previous_instances, accumulator)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -244,6 +245,25 @@ impl AggregationCircuit {
     }
 }
 
+impl CircuitExt<Fr> for AggregationCircuit {
+    fn num_instance() -> Vec<usize> {
+        // [..lhs, ..rhs]
+        vec![4 * LIMBS]
+    }
+
+    fn instances(&self) -> Vec<Vec<Fr>> {
+        vec![self.instances.clone()]
+    }
+
+    fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
+        Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())
+    }
+
+    fn selectors(config: &Self::Config) -> Vec<Selector> {
+        config.gate().basic_gates.iter().map(|gate| gate.q_enable).collect()
+    }
+}
+
 impl Circuit<Fr> for AggregationCircuit {
     type Config = AggregationConfig;
     type FloorPlanner = SimpleFloorPlanner;
@@ -323,7 +343,16 @@ impl Circuit<Fr> for AggregationCircuit {
                     .chain(lhs.y.truncation.limbs.iter())
                     .chain(rhs.x.truncation.limbs.iter())
                     .chain(rhs.y.truncation.limbs.iter())
-                    .map(|assigned| assigned.cell().clone())
+                    .map(|assigned| {
+                        #[cfg(feature = "halo2-axiom")]
+                        {
+                            *assigned.cell()
+                        }
+                        #[cfg(feature = "halo2-pse")]
+                        {
+                            assigned.cell()
+                        }
+                    })
                     .collect_vec();
                 #[cfg(feature = "display")]
                 end_timer!(witness_time);

@@ -1,66 +1,34 @@
-#![allow(clippy::type_complexity)]
-use crate::cost::CostEstimation;
+#![allow(clippy::let_and_return)]
 use crate::halo2_proofs;
-use crate::pcs::MultiOpenScheme;
-use crate::{
-    loader::native::NativeLoader,
-    pcs,
-    poseidon::Spec,
-    system::halo2::{compile, Config},
-    util::transcript::TranscriptWrite,
-    verifier::PlonkProof,
-    Protocol,
-};
+use crate::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
-    circuit::{Layouter, Value},
-    dev::MockProver,
+    circuit::Value,
     halo2curves::{
         bn256::{Bn256, Fr, G1Affine},
         group::ff::Field,
     },
-    plonk::{
-        create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem, Error,
-        ProvingKey, Selector, VerifyingKey,
-    },
-    poly::{
-        commitment::{Params, ParamsProver, Prover, Verifier},
-        kzg::{
-            commitment::{KZGCommitmentScheme, ParamsKZG},
-            msm::DualMSM,
-            multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
-            strategy::{AccumulatorStrategy, GuardKZG},
-        },
-        VerificationStrategy,
-    },
+    plonk::{keygen_pk, keygen_vk, Circuit, ProvingKey, Selector},
+    poly::kzg::commitment::ParamsKZG,
 };
 use itertools::Itertools;
-use lazy_static::lazy_static;
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
 use std::{
     fs::{self, File},
     io::{BufReader, BufWriter},
-    iter,
-    marker::PhantomData,
     path::Path,
 };
 
+#[cfg(feature = "loader_evm")]
 pub mod evm;
+#[cfg(feature = "loader_halo2")]
 pub mod halo2;
 
-// Poseidon parameters
-const T: usize = 5;
-const RATE: usize = 4;
-const R_F: usize = 8;
-const R_P: usize = 60;
+const LIMBS: usize = 3;
+const BITS: usize = 88;
 
-pub type PoseidonTranscript<L, S> =
-    crate::system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
-lazy_static! {
-    pub static ref POSEIDON_SPEC: Spec<Fr, T, RATE> = Spec::new(R_F, R_P);
-}
+/// PCS be either `Kzg<Bn256, Gwc19>` or `Kzg<Bn256, Bdfg21>`
+pub type Plonk<PCS> = verifier::Plonk<PCS, LimbsEncoding<LIMBS, BITS>>;
 
 pub struct Snark {
     pub protocol: Protocol<G1Affine>,
@@ -186,178 +154,6 @@ pub fn gen_pk<C: Circuit<Fr>>(
     }
 }
 
-/// Generates a native proof using either SHPLONK or GWC proving method. Uses Poseidon for Fiat-Shamir.
-///
-/// Caches the instances and proof if `path` is specified.
-pub fn gen_proof<'params, C, P, V>(
-    params: &'params ParamsKZG<Bn256>,
-    pk: &'params ProvingKey<G1Affine>,
-    circuit: C,
-    instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Vec<u8>
-where
-    C: Circuit<Fr>,
-    P: Prover<'params, KZGCommitmentScheme<Bn256>>,
-    V: Verifier<
-        'params,
-        KZGCommitmentScheme<Bn256>,
-        Guard = GuardKZG<'params, Bn256>,
-        MSMAccumulator = DualMSM<'params, Bn256>,
-    >,
-{
-    #[cfg(debug_assertions)]
-    {
-        MockProver::run(params.k(), &circuit, instances.clone()).unwrap().assert_satisfied();
-    }
-
-    let mut proof: Option<Vec<u8>> = None;
-
-    if let Some((instance_path, proof_path)) = path {
-        let cached_instances = read_instances(instance_path);
-        if matches!(cached_instances, Ok(tmp) if tmp == instances) && proof_path.exists() {
-            #[cfg(feature = "display")]
-            let read_time = start_timer!(|| format!("Reading proof from {proof_path:?}"));
-
-            proof = Some(fs::read(proof_path).unwrap());
-
-            #[cfg(feature = "display")]
-            end_timer!(read_time);
-        }
-    }
-
-    let instances = instances.iter().map(Vec::as_slice).collect_vec();
-
-    let proof = proof.unwrap_or_else(|| {
-        #[cfg(feature = "display")]
-        let proof_time = start_timer!(|| "Create proof");
-
-        transcript.clear();
-        create_proof::<_, P, _, _, _, _>(
-            params,
-            pk,
-            &[circuit],
-            &[&instances],
-            &mut ChaCha20Rng::from_entropy(),
-            transcript,
-        )
-        .unwrap();
-        let proof = transcript.stream_mut().split_off(0);
-
-        #[cfg(feature = "display")]
-        end_timer!(proof_time);
-
-        if let Some((instance_path, proof_path)) = path {
-            write_instances(&instances, instance_path);
-            fs::write(proof_path, &proof).unwrap();
-        }
-        proof
-    });
-
-    debug_assert!({
-        let mut transcript = PoseidonTranscript::<NativeLoader, &[u8]>::new(proof.as_slice());
-        VerificationStrategy::<_, V>::finalize(
-            verify_proof::<_, V, _, _, _>(
-                params.verifier_params(),
-                pk.get_vk(),
-                AccumulatorStrategy::new(params.verifier_params()),
-                &[instances.as_slice()],
-                &mut transcript,
-            )
-            .unwrap(),
-        )
-    });
-
-    proof
-}
-
-pub fn gen_proof_gwc<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: C,
-    instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Vec<u8> {
-    gen_proof::<C, ProverGWC<_>, VerifierGWC<_>>(params, pk, circuit, instances, transcript, path)
-}
-
-pub fn gen_proof_shplonk<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: C,
-    instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Vec<u8> {
-    gen_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(
-        params, pk, circuit, instances, transcript, path,
-    )
-}
-
-pub fn gen_snark<'params, ConcreteCircuit, P, V>(
-    params: &'params ParamsKZG<Bn256>,
-    pk: &'params ProvingKey<G1Affine>,
-    circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Snark
-where
-    ConcreteCircuit: CircuitExt<Fr>,
-    P: Prover<'params, KZGCommitmentScheme<Bn256>>,
-    V: Verifier<
-        'params,
-        KZGCommitmentScheme<Bn256>,
-        Guard = GuardKZG<'params, Bn256>,
-        MSMAccumulator = DualMSM<'params, Bn256>,
-    >,
-{
-    let protocol = compile(
-        params,
-        pk.get_vk(),
-        Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance())
-            .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
-    );
-
-    let instances = circuit.instances();
-    let proof = gen_proof::<ConcreteCircuit, P, V>(
-        params,
-        pk,
-        circuit,
-        instances.clone(),
-        transcript,
-        path,
-    );
-
-    Snark::new(protocol, instances, proof)
-}
-
-pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Snark {
-    gen_snark::<ConcreteCircuit, ProverGWC<_>, VerifierGWC<_>>(
-        params, pk, circuit, transcript, path,
-    )
-}
-
-pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    path: Option<(&Path, &Path)>,
-) -> Snark {
-    gen_snark::<ConcreteCircuit, ProverSHPLONK<_>, VerifierSHPLONK<_>>(
-        params, pk, circuit, transcript, path,
-    )
-}
-
 pub fn read_instances(path: impl AsRef<Path>) -> Result<Vec<Vec<Fr>>, bincode::Error> {
     let f = File::open(path)?;
     let reader = BufReader::new(f);
@@ -386,82 +182,18 @@ pub fn write_instances(instances: &[&[Fr]], path: impl AsRef<Path>) {
     bincode::serialize_into(f, &instances).unwrap();
 }
 
-pub fn gen_dummy_snark<ConcreteCircuit, MOS>(
-    params: &ParamsKZG<Bn256>,
-    vk: Option<&VerifyingKey<G1Affine>>,
-) -> Snark
-where
-    ConcreteCircuit: CircuitExt<Fr>,
-    MOS: MultiOpenScheme<G1Affine, NativeLoader>
-        + CostEstimation<G1Affine, Input = Vec<pcs::Query<Fr>>>,
-{
-    struct CsProxy<F, C>(PhantomData<(F, C)>);
+#[cfg(feature = "zkevm")]
+mod zkevm {
+    use super::CircuitExt;
+    use eth_types::Field;
+    use zkevm_circuits::evm_circuit::EvmCircuit;
 
-    impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C> {
-        type Config = C::Config;
-        type FloorPlanner = C::FloorPlanner;
-
-        fn without_witnesses(&self) -> Self {
-            CsProxy(PhantomData)
+    impl<F: Field> CircuitExt<F> for EvmCircuit<F> {
+        fn instances(&self) -> Vec<Vec<F>> {
+            vec![]
         }
-
-        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            C::configure(meta)
-        }
-
-        fn synthesize(
-            &self,
-            config: Self::Config,
-            mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
-            // when `C` has simple selectors, we tell `CsProxy` not to over-optimize the selectors (e.g., compressing them  all into one) by turning all selectors on in the first row
-            // currently this only works if all simple selector columns are used in the actual circuit and there are overlaps amongst all enabled selectors (i.e., the actual circuit will not optimize constraint system further)
-            layouter.assign_region(
-                || "",
-                |mut region| {
-                    for q in C::selectors(&config).iter() {
-                        q.enable(&mut region, 0)?;
-                    }
-                    Ok(())
-                },
-            )?;
-            Ok(())
+        fn num_instance() -> Vec<usize> {
+            vec![]
         }
     }
-
-    let dummy_vk = vk
-        .is_none()
-        .then(|| keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>(PhantomData)).unwrap());
-    let protocol = compile(
-        params,
-        vk.or(dummy_vk.as_ref()).unwrap(),
-        Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance())
-            .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
-    );
-    let instances = ConcreteCircuit::num_instance()
-        .into_iter()
-        .map(|n| iter::repeat(Fr::default()).take(n).collect())
-        .collect();
-    let proof = {
-        let mut transcript = PoseidonTranscript::<NativeLoader, _>::new(Vec::new());
-        for _ in 0..protocol
-            .num_witness
-            .iter()
-            .chain(Some(&protocol.quotient.num_chunk()))
-            .sum::<usize>()
-        {
-            transcript.write_ec_point(G1Affine::default()).unwrap();
-        }
-        for _ in 0..protocol.evaluations.len() {
-            transcript.write_scalar(Fr::default()).unwrap();
-        }
-        let queries = PlonkProof::<G1Affine, NativeLoader, MOS>::empty_queries(&protocol);
-        for _ in 0..MOS::estimate_cost(&queries).num_commitment {
-            transcript.write_ec_point(G1Affine::default()).unwrap();
-        }
-        transcript.finalize()
-    };
-
-    Snark::new(protocol, instances, proof)
 }

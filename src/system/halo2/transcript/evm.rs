@@ -1,3 +1,4 @@
+use crate::halo2_proofs;
 use crate::{
     loader::{
         evm::{loader::Value, u256_to_fe, EcPoint, EvmLoader, MemoryChunk, Scalar},
@@ -37,12 +38,7 @@ where
         assert_eq!(ptr, 0);
         let mut buf = MemoryChunk::new(ptr);
         buf.extend(0x20);
-        Self {
-            loader: loader.clone(),
-            stream: 0,
-            buf,
-            _marker: PhantomData,
-        }
+        Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
     }
 
     pub fn load_instances(&mut self, num_instance: Vec<usize>) -> Vec<Vec<Scalar>> {
@@ -149,12 +145,7 @@ where
     C: CurveAffine,
 {
     pub fn new(stream: S) -> Self {
-        Self {
-            loader: NativeLoader,
-            stream,
-            buf: Vec::new(),
-            _marker: PhantomData,
-        }
+        Self { loader: NativeLoader, stream, buf: Vec::new(), _marker: PhantomData }
     }
 }
 
@@ -172,11 +163,7 @@ where
             .buf
             .iter()
             .cloned()
-            .chain(if self.buf.len() == 0x20 {
-                Some(1)
-            } else {
-                None
-            })
+            .chain(if self.buf.len() == 0x20 { Some(1) } else { None })
             .collect_vec();
         let hash: [u8; 32] = Keccak256::digest(data).into();
         self.buf = hash.to_vec();
@@ -193,8 +180,7 @@ where
             })?;
 
         [coordinates.x(), coordinates.y()].map(|coordinate| {
-            self.buf
-                .extend(coordinate.to_repr().as_ref().iter().rev().cloned());
+            self.buf.extend(coordinate.to_repr().as_ref().iter().rev().cloned());
         });
 
         Ok(())
@@ -220,10 +206,7 @@ where
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
         data.reverse();
         let scalar = C::Scalar::from_repr_vartime(data).ok_or_else(|| {
-            Error::Transcript(
-                io::ErrorKind::Other,
-                "Invalid scalar encoding in proof".to_string(),
-            )
+            Error::Transcript(io::ErrorKind::Other, "Invalid scalar encoding in proof".to_string())
         })?;
         self.common_scalar(&scalar)?;
         Ok(scalar)
@@ -239,10 +222,8 @@ where
         }
         let x = Option::from(<C::Base as PrimeField>::from_repr(x));
         let y = Option::from(<C::Base as PrimeField>::from_repr(y));
-        let ec_point = x
-            .zip(y)
-            .and_then(|(x, y)| Option::from(C::from_xy(x, y)))
-            .ok_or_else(|| {
+        let ec_point =
+            x.zip(y).and_then(|(x, y)| Option::from(C::from_xy(x, y))).ok_or_else(|| {
                 Error::Transcript(
                     io::ErrorKind::Other,
                     "Invalid elliptic curve point encoding in proof".to_string(),

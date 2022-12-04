@@ -88,9 +88,9 @@ impl<F: FieldExt> Circuit<F> for StandardPlonk<F> {
                 #[cfg(feature = "halo2-pse")]
                 {
                     region.assign_advice(|| "", config.a, 0, || Value::known(self.0))?;
-                    region.assign_fixed(|| "", config.q_a, 0, || Value::known(-Fr::one()))?;
+                    region.assign_fixed(|| "", config.q_a, 0, || Value::known(-F::one()))?;
 
-                    region.assign_advice(|| "", config.a, 1, || Value::known(-Fr::from(5u64)))?;
+                    region.assign_advice(|| "", config.a, 1, || Value::known(-F::from(5u64)))?;
                     for (idx, column) in (1..).zip([
                         config.q_a,
                         config.q_b,
@@ -102,11 +102,11 @@ impl<F: FieldExt> Circuit<F> for StandardPlonk<F> {
                             || "",
                             column,
                             1,
-                            || Value::known(Fr::from(idx as u64)),
+                            || Value::known(F::from(idx as u64)),
                         )?;
                     }
 
-                    let a = region.assign_advice(|| "", config.a, 2, || Value::known(Fr::one()))?;
+                    let a = region.assign_advice(|| "", config.a, 2, || Value::known(F::one()))?;
                     a.copy_advice(|| "", &mut region, config.b, 3)?;
                     a.copy_advice(|| "", &mut region, config.c, 4)?;
                 }

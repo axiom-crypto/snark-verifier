@@ -133,6 +133,7 @@ pub trait EccInstructions<'a, C: CurveAffine>: Clone + Debug {
 mod halo2_lib {
     use crate::halo2_proofs::{
         circuit::{Cell, Value},
+        halo2curves::CurveAffineExt,
         plonk::Error,
     };
     use crate::{
@@ -142,7 +143,6 @@ mod halo2_lib {
     use halo2_base::{
         self,
         gates::{flex_gate::FlexGateConfig, GateInstructions, RangeInstructions},
-        halo2_proofs::halo2curves::CurveAffineExt,
         utils::PrimeField,
         AssignedValue,
         QuantumCell::{Constant, Existing, Witness},

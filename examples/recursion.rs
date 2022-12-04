@@ -5,7 +5,7 @@ use common::*;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     dev::MockProver,
     halo2curves::{
         bn256::{Bn256, Fq, Fr, G1Affine},
@@ -773,7 +773,9 @@ mod recursion {
 
                     // IMPORTANT:
                     config.base_field_config.finalize(&mut ctx);
+                    #[cfg(feature = "display")]
                     dbg!(ctx.total_advice);
+                    #[cfg(feature = "display")]
                     println!("Advice columns used: {}", ctx.advice_alloc[0][0].0 + 1);
 
                     assigned_instances.extend(
