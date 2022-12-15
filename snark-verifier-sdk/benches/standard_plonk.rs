@@ -9,19 +9,18 @@ use halo2_proofs::{
     halo2curves::bn256::Bn256,
     poly::{commitment::Params, kzg::commitment::ParamsKZG},
 };
-use plonk_verifier::{
-    loader::native::NativeLoader,
-    sdk::{
-        self, gen_pk,
-        halo2::{
-            aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk,
-            PoseidonTranscript, POSEIDON_SPEC,
-        },
-    },
-};
 use rand::rngs::OsRng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use snark_verifier::loader::native::NativeLoader;
+use snark_verifier_sdk::{
+    gen_pk,
+    halo2::{
+        aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk, PoseidonTranscript,
+        POSEIDON_SPEC,
+    },
+    Snark,
+};
 
 mod application {
     use super::halo2_curves::bn256::Fr;
@@ -30,9 +29,8 @@ mod application {
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance},
         poly::Rotation,
     };
-    use halo2_base::halo2_proofs::plonk::Assigned;
-    use plonk_verifier::sdk::CircuitExt;
     use rand::RngCore;
+    use snark_verifier_sdk::CircuitExt;
 
     #[derive(Clone, Copy)]
     pub struct StandardPlonkConfig {
@@ -157,13 +155,9 @@ mod application {
                             0,
                             Value::known(Assigned::Trivial(self.0)),
                         )?;
-                        region.assign_fixed(config.q_a, 0, Assigned::Trivial(-Fr::one()));
+                        region.assign_fixed(config.q_a, 0, -Fr::one());
 
-                        region.assign_advice(
-                            config.a,
-                            1,
-                            Value::known(Assigned::Trivial(-Fr::from(5u64))),
-                        )?;
+                        region.assign_advice(config.a, 1, Value::known(-Fr::from(5u64)))?;
                         for (idx, column) in (1..).zip([
                             config.q_a,
                             config.q_b,
@@ -171,14 +165,10 @@ mod application {
                             config.q_ab,
                             config.constant,
                         ]) {
-                            region.assign_fixed(column, 1, Assigned::Trivial(Fr::from(idx as u64)));
+                            region.assign_fixed(column, 1, Fr::from(idx as u64));
                         }
 
-                        let a = region.assign_advice(
-                            config.a,
-                            2,
-                            Value::known(Assigned::Trivial(Fr::one())),
-                        )?;
+                        let a = region.assign_advice(config.a, 2, Value::known(Fr::one()))?;
                         a.copy_advice(&mut region, config.b, 3);
                         a.copy_advice(&mut region, config.c, 4);
                     }
@@ -193,7 +183,7 @@ mod application {
 fn gen_application_snark(
     params: &ParamsKZG<Bn256>,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-) -> sdk::Snark {
+) -> Snark {
     let circuit = application::StandardPlonk::rand(OsRng);
 
     let pk = gen_pk(params, &circuit, None);

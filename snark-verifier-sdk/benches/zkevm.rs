@@ -1,28 +1,24 @@
-use std::env::{set_var, var};
-use std::path::Path;
-
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves::bn256::Fr;
-use plonk_verifier::sdk::halo2::aggregation::load_verify_circuit_degree;
-use plonk_verifier::{
-    loader::native::NativeLoader,
-    sdk::{
-        self,
-        evm::{
-            evm_verify, gen_evm_proof_gwc, gen_evm_proof_shplonk, gen_evm_verifier_gwc,
-            gen_evm_verifier_shplonk,
-        },
-        gen_pk,
-        halo2::{
-            aggregation::AggregationCircuit, gen_proof_gwc, gen_proof_shplonk, gen_snark_shplonk,
-            PoseidonTranscript, POSEIDON_SPEC,
-        },
-    },
-};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use snark_verifier::loader::native::NativeLoader;
+use snark_verifier_sdk::{
+    self,
+    evm::{
+        evm_verify, gen_evm_proof_gwc, gen_evm_proof_shplonk, gen_evm_verifier_gwc,
+        gen_evm_verifier_shplonk,
+    },
+    gen_pk,
+    halo2::{
+        aggregation::load_verify_circuit_degree, aggregation::AggregationCircuit, gen_proof_gwc,
+        gen_proof_shplonk, gen_snark_shplonk, PoseidonTranscript, POSEIDON_SPEC,
+    },
+};
+use std::env::{set_var, var};
+use std::path::Path;
 
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};

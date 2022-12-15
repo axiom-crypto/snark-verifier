@@ -1,36 +1,32 @@
-use super::CircuitExt;
-use crate::{
-    halo2_proofs::{
-        dev::MockProver,
-        halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
-        plonk::{create_proof, verify_proof, Circuit, ProvingKey, VerifyingKey},
-        poly::{
-            commitment::{Params, ParamsProver, Prover, Verifier},
-            kzg::{
-                commitment::{KZGCommitmentScheme, ParamsKZG},
-                msm::DualMSM,
-                multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
-                strategy::{AccumulatorStrategy, GuardKZG},
-            },
-            VerificationStrategy,
+use super::{CircuitExt, Plonk};
+use ethereum_types::Address;
+use halo2_base::halo2_proofs::{
+    dev::MockProver,
+    halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
+    plonk::{create_proof, verify_proof, Circuit, ProvingKey, VerifyingKey},
+    poly::{
+        commitment::{Params, ParamsProver, Prover, Verifier},
+        kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            msm::DualMSM,
+            multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
+            strategy::{AccumulatorStrategy, GuardKZG},
         },
-        transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
+        VerificationStrategy,
     },
-    pcs::kzg::{Bdfg21, Gwc19, Kzg},
-    sdk::Plonk,
+    transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
 };
-use crate::{
+use itertools::Itertools;
+use rand::Rng;
+use snark_verifier::{
     loader::evm::{compile_yul, encode_calldata, EvmLoader, ExecutorBuilder},
     pcs::{
-        kzg::{KzgAccumulator, KzgDecidingKey, KzgSuccinctVerifyingKey},
+        kzg::{Bdfg21, Gwc19, Kzg, KzgAccumulator, KzgDecidingKey, KzgSuccinctVerifyingKey},
         Decider, MultiOpenScheme, PolynomialCommitmentScheme,
     },
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::PlonkVerifier,
 };
-use ethereum_types::Address;
-use itertools::Itertools;
-use rand::Rng;
 use std::{fs, io, path::Path, rc::Rc};
 
 /// Generates a proof for evm verification using either SHPLONK or GWC proving method. Uses Keccak for Fiat-Shamir.

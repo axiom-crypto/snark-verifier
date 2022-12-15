@@ -1,0 +1,66 @@
+[package]
+name = "snark-verifier-sdk"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+itertools = "0.10.3"
+lazy_static = "1.4.0"
+num-bigint = "0.4.3"
+num-integer = "0.1.45"
+num-traits = "0.2.15"
+rand = "0.8"
+rand_chacha = "0.3.1"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3.3"
+ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
+
+halo2-base = { git = "ssh://github.com/axiom-crypto/axiom-core-working.git", branch = "experiment/optimizations", default-features = false }
+snark-verifier = { path = "../snark-verifier", default-features = false }
+
+# loader_evm
+ethereum-types = { version = "0.14", default-features = false, features = ["std"], optional = true }
+# sha3 = { version = "0.10", optional = true }
+# revm = { version = "2.3.1", optional = true }
+# bytes = { version = "1.2", optional = true }
+# rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
+
+# zkevm benchmarks
+zkevm-circuits = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", features = ["test"], optional = true }
+bus-mapping = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
+eth-types = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
+mock = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
+
+[dev-dependencies]
+ark-std = { version = "0.3.0", features = ["print-trace"] }
+paste = "1.0.7"
+pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
+criterion = "0.4"
+criterion-macro = "0.4"
+# loader_evm
+crossterm = { version = "0.25" }
+tui = { version = "0.19", default-features = false, features = ["crossterm"] }
+
+[features]
+default = ["loader_evm", "loader_halo2", "zkevm", "halo2-pse", "halo2-base/jemallocator"]
+display = ["snark-verifier/display"]
+loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
+loader_halo2 = ["snark-verifier/loader_halo2"]
+parallel = ["snark-verifier/parallel"]
+# EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
+halo2-pse = ["snark-verifier/halo2-pse"]
+halo2-axiom = ["snark-verifier/halo2-axiom"]
+
+zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
+
+[[bench]]
+name = "standard_plonk"
+required-features = ["loader_halo2"]
+harness = false
+
+[[bench]]
+name = "zkevm"
+required-features = ["loader_halo2", "zkevm", "halo2-pse", "halo2-base/jemallocator"]
+harness = false

@@ -1,17 +1,7 @@
 use super::{read_instances, write_instances, CircuitExt, Snark, SnarkWitness};
-use crate::cost::CostEstimation;
-use crate::halo2_proofs;
-use crate::pcs::MultiOpenScheme;
-use crate::{
-    loader::native::NativeLoader,
-    pcs,
-    poseidon::Spec,
-    system::halo2::{compile, Config},
-    util::transcript::TranscriptWrite,
-    verifier::PlonkProof,
-};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
+use halo2_base::{halo2_proofs, poseidon::Spec};
 use halo2_proofs::{
     circuit::Layouter,
     dev::MockProver,
@@ -37,6 +27,14 @@ use halo2_proofs::{
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use rand::Rng;
+use snark_verifier::{
+    cost::CostEstimation,
+    loader::native::NativeLoader,
+    pcs::{self, MultiOpenScheme},
+    system::halo2::{compile, Config},
+    util::transcript::TranscriptWrite,
+    verifier::PlonkProof,
+};
 use std::{fs, iter, marker::PhantomData, path::Path};
 
 pub mod aggregation;
@@ -48,7 +46,15 @@ const R_F: usize = 8;
 const R_P: usize = 60;
 
 pub type PoseidonTranscript<L, S> =
-    crate::system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+    snark_verifier::system::halo2::transcript::halo2::PoseidonTranscript<
+        G1Affine,
+        L,
+        S,
+        T,
+        RATE,
+        R_F,
+        R_P,
+    >;
 
 lazy_static! {
     pub static ref POSEIDON_SPEC: Spec<Fr, T, RATE> = Spec::new(R_F, R_P);

@@ -1,25 +1,28 @@
-use crate::halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};
-use crate::halo2_proofs::{
+use crate::{Plonk, BITS, LIMBS};
+#[cfg(feature = "display")]
+use ark_std::{end_timer, start_timer};
+use halo2_base::halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
+    halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
     plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
-use crate::{
-    loader::{self, native::NativeLoader},
+use halo2_base::{Context, ContextParams};
+use itertools::Itertools;
+use rand::Rng;
+use snark_verifier::{
+    loader::{
+        self,
+        halo2::halo2_ecc::{self, ecc::EccChip},
+        native::NativeLoader,
+    },
     pcs::{
         kzg::{Bdfg21, Kzg, KzgAccumulator, KzgAs, KzgSuccinctVerifyingKey},
         AccumulationScheme, AccumulationSchemeProver, MultiOpenScheme, PolynomialCommitmentScheme,
     },
-    sdk::{Plonk, BITS, LIMBS},
     util::arithmetic::fe_to_limbs,
     verifier::PlonkVerifier,
 };
-#[cfg(feature = "display")]
-use ark_std::{end_timer, start_timer};
-use halo2_base::{Context, ContextParams};
-use halo2_ecc::ecc::EccChip;
-use itertools::Itertools;
-use rand::Rng;
 use std::{fs::File, rc::Rc};
 
 use super::{CircuitExt, PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
@@ -167,6 +170,8 @@ impl AggregationConfig {
 }
 
 /// Aggregation circuit that does not re-expose any public inputs from aggregated snarks
+///
+/// This is mostly a reference implementation. In practice one will probably need to re-implement the circuit for one's particular use case with specific instance logic.
 #[derive(Clone)]
 pub struct AggregationCircuit {
     svk: Svk,
@@ -260,7 +265,7 @@ impl CircuitExt<Fr> for AggregationCircuit {
     }
 
     fn selectors(config: &Self::Config) -> Vec<Selector> {
-        config.gate().basic_gates.iter().map(|gate| gate.q_enable).collect()
+        config.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
     }
 }
 
@@ -312,7 +317,7 @@ impl Circuit<Fr> for AggregationCircuit {
                     region,
                     ContextParams {
                         max_rows: config.gate().max_rows,
-                        num_advice: vec![config.gate().num_advice],
+                        num_context_ids: 1,
                         fixed_columns: config.gate().constants.clone(),
                     },
                 );

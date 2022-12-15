@@ -1,89 +1,8 @@
-[package]
-name = "plonk_verifier"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-itertools = "0.10.3"
-lazy_static = "1.4.0"
-num-bigint = "0.4.3"
-num-integer = "0.1.45"
-num-traits = "0.2.15"
-rand = "0.8"
-rand_chacha = "0.3.1"
-hex = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-bincode = "1.3.3"
-ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
-
-# Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
-halo2-base = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", branch = "experiment/optimizations", default-features = false }
-
-# parallel
-rayon = { version = "1.5.3", optional = true }
-
-# loader_evm
-ethereum_types = { package = "ethereum-types", version = "0.14", default-features = false, features = ["std"], optional = true }
-sha3 = { version = "0.10", optional = true }
-revm = { version = "2.3.1", optional = true }
-bytes = { version = "1.2", optional = true }
-rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
-
-# loader_halo2
-halo2-ecc = { git = "ssh://github.com/axiom-crypto/halo2-lib-working.git", branch = "experiment/optimizations", default-features = false, optional = true }
-
-# zkevm benchmarks
-zkevm-circuits = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", features = ["test"], optional = true }
-bus-mapping = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
-eth-types = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
-mock = { git = "https://github.com/jonathanpwang/zkevm-circuits.git", branch = "bench-12-04", optional = true }
-
-[dev-dependencies]
-ark-std = { version = "0.3.0", features = ["print-trace"] }
-paste = "1.0.7"
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
-criterion = "0.4"
-criterion-macro = "0.4"
-# loader_evm
-crossterm = { version = "0.25" }
-tui = { version = "0.19", default-features = false, features = ["crossterm"] }
-
-[features]
-default = ["loader_evm", "loader_halo2", "zkevm", "halo2-pse", "halo2-ecc?/jemallocator"]
-display = ["halo2-base/display", "halo2-ecc?/display", "ark-std"]
-# EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
-halo2-pse = ["halo2-base/halo2-pse", "halo2-ecc?/halo2-pse"]
-halo2-axiom = ["halo2-base/halo2-axiom", "halo2-ecc?/halo2-axiom"]
-
-parallel = ["dep:rayon"]
-
-loader_evm = ["dep:ethereum_types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
-loader_halo2 = ["halo2-ecc"]
-
-zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
-
-[[example]]
-name = "evm-verifier"
-required-features = ["loader_evm"]
-
-[[example]]
-name = "evm-verifier-with-accumulator"
-required-features = ["loader_halo2", "loader_evm"]
-
-[[example]]
-name = "recursion"
-required-features = ["loader_halo2"]
-
-[[bench]]
-name = "standard_plonk"
-required-features = ["loader_halo2"]
-harness = false
-
-[[bench]]
-name = "zkevm"
-required-features = ["loader_halo2", "zkevm", "halo2-pse"]
-harness = false
+[workspace]
+members = [
+    "snark-verifier",
+    "snark-verifier-sdk",
+]
 
 [profile.dev]
 opt-level = 3
@@ -115,12 +34,19 @@ incremental = false
 inherits = "release"
 debug = true
 
-[patch."ssh://github.com/axiom-crypto/halo2-lib-working.git"]
-halo2-base = { path = "../halo2-lib-working/halo2-base" }
-halo2-ecc = { path = "../halo2-lib-working/halo2-ecc" }
+[patch."ssh://github.com/axiom-crypto/axiom-core-working.git"]
+halo2-base = { path = "../axiom-core-working/halo2-lib/halo2-base" }
+halo2-ecc = { path = "../axiom-core-working/halo2-lib/halo2-ecc" }
 
-[patch."https://github.com/privacy-scaling-explorations/halo2curves.git"] 
+[patch."https://github.com/axiom-crypto/halo2.git"]
+halo2_proofs = { path = "../halo2/halo2_proofs" }
 halo2curves = { path = "../halo2/arithmetic/curves" }
+poseidon = { path = "../halo2/primitives/poseidon" }
 
+# patch for now because PSE/halo2 has not yet updated halo2curves version, unnecessary if halo2_proofs is using latest halo2curves with Fq12 public
+[patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
+halo2curves = { path = "../halo2/arithmetic/curves" } 
+
+# patch just because we cannot patch the same repo with different tag: serialization is already in latest PSE/halo2 but not in v2022_10_22
 [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
 halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization" }

@@ -1,8 +1,6 @@
-#![allow(clippy::let_and_return)]
-use crate::halo2_proofs;
-use crate::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
+use halo2_base::halo2_proofs;
 use halo2_proofs::{
     circuit::Value,
     halo2curves::{
@@ -13,6 +11,7 @@ use halo2_proofs::{
     poly::kzg::commitment::ParamsKZG,
 };
 use itertools::Itertools;
+use snark_verifier::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 use std::{
     fs::{self, File},
     io::{BufReader, BufWriter},

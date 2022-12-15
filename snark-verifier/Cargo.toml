@@ -1,0 +1,61 @@
+[package]
+name = "snark-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itertools = "0.10.3"
+lazy_static = "1.4.0"
+num-bigint = "0.4.3"
+num-integer = "0.1.45"
+num-traits = "0.2.15"
+hex = "0.4"
+rand = "0.8"
+
+# Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
+halo2-base = { git = "ssh://github.com/axiom-crypto/axiom-core-working.git", branch = "experiment/optimizations", default-features = false }
+
+# parallel
+rayon = { version = "1.5.3", optional = true }
+
+# loader_evm
+ethereum-types = { version = "0.14", default-features = false, features = ["std"], optional = true }
+sha3 = { version = "0.10", optional = true }
+revm = { version = "2.3.1", optional = true }
+bytes = { version = "1.2", optional = true }
+rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
+
+# loader_halo2
+halo2-ecc = { git = "ssh://github.com/axiom-crypto/axiom-core-working.git", branch = "experiment/optimizations", default-features = false, optional = true }
+
+[dev-dependencies]
+ark-std = { version = "0.3.0", features = ["print-trace"] }
+paste = "1.0.7"
+rand_chacha = "0.3.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# loader_evm
+crossterm = { version = "0.25" }
+tui = { version = "0.19", default-features = false, features = ["crossterm"] }
+
+[features]
+default = ["loader_evm", "loader_halo2", "halo2-pse"]
+display = ["halo2-base/display", "halo2-ecc?/display"]
+loader_evm = ["dep:ethereum-types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
+loader_halo2 = ["halo2-ecc"]
+parallel = ["dep:rayon"]
+# EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
+halo2-pse = ["halo2-base/halo2-pse", "halo2-ecc?/halo2-pse"]
+halo2-axiom = ["halo2-base/halo2-axiom", "halo2-ecc?/halo2-axiom"]
+
+[[example]]
+name = "evm-verifier"
+required-features = ["loader_evm"]
+
+[[example]]
+name = "evm-verifier-with-accumulator"
+required-features = ["loader_halo2", "loader_evm"]
+
+[[example]]
+name = "recursion"
+required-features = ["loader_halo2"]

@@ -368,7 +368,7 @@ impl Circuit<Fr> for Accumulation {
                     region,
                     ContextParams {
                         max_rows: config.base_field_config.range.gate.max_rows,
-                        num_advice: vec![config.base_field_config.range.gate.num_advice],
+                        num_context_ids: 1,
                         fixed_columns: config.base_field_config.range.gate.constants.clone(),
                     },
                 );

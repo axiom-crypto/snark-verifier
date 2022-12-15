@@ -12,7 +12,7 @@ pub use loader::{EcPoint, Halo2Loader, Scalar};
 pub use shim::{Context, EccInstructions, IntegerInstructions};
 pub use util::Valuetools;
 
-// pub use halo2_wrong_ecc;
+pub use halo2_ecc;
 
 mod util {
     use crate::halo2_proofs::circuit::Value;

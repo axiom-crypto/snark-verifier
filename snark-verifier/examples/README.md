@@ -1,4 +1,4 @@
-In `plonk-verifier` root directory:
+In `snark-verifier` root directory:
 
 1. Create `./configs/verify_circuit.config`
 

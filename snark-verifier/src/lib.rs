@@ -5,7 +5,6 @@
 pub mod cost;
 pub mod loader;
 pub mod pcs;
-pub mod sdk;
 pub mod system;
 pub mod util;
 pub mod verifier;

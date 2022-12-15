@@ -10,7 +10,7 @@ use halo2_proofs::{
     halo2curves::{
         bn256::{Bn256, Fq, Fr, G1Affine},
         group::ff::Field,
-        CurveAffine, FieldExt,
+        FieldExt,
     },
     plonk::{
         self, create_proof, keygen_pk, keygen_vk, Circuit, ConstraintSystem, Error, ProvingKey,
@@ -19,7 +19,7 @@ use halo2_proofs::{
     poly::{
         commitment::ParamsProver,
         kzg::{
-            commitment::{KZGCommitmentScheme, ParamsKZG},
+            commitment::ParamsKZG,
             multiopen::{ProverGWC, VerifierGWC},
             strategy::AccumulatorStrategy,
         },
@@ -27,7 +27,8 @@ use halo2_proofs::{
     },
 };
 use itertools::Itertools;
-use plonk_verifier::{
+use rand_chacha::rand_core::OsRng;
+use snark_verifier::{
     loader::{self, native::NativeLoader, Loader, ScalarLoader},
     pcs::{
         kzg::{Gwc19, Kzg, KzgAccumulator, KzgAs, KzgSuccinctVerifyingKey, LimbsEncoding},
@@ -40,10 +41,6 @@ use plonk_verifier::{
     },
     verifier::{self, PlonkProof, PlonkVerifier},
     Protocol,
-};
-use rand_chacha::{
-    rand_core::{OsRng, SeedableRng},
-    ChaCha20Rng,
 };
 use std::{fs, iter, marker::PhantomData, rc::Rc};
 
@@ -67,7 +64,7 @@ type PoseidonTranscript<L, S> =
 mod common {
     use super::*;
     use halo2_proofs::{plonk::verify_proof, poly::commitment::Params};
-    use plonk_verifier::{cost::CostEstimation, util::transcript::TranscriptWrite};
+    use snark_verifier::{cost::CostEstimation, util::transcript::TranscriptWrite};
 
     pub fn poseidon<L: Loader<G1Affine>>(
         loader: &L,
@@ -354,7 +351,7 @@ mod recursion {
     };
     use halo2_ecc::ecc::EccChip;
     use halo2_proofs::plonk::{Column, Instance};
-    use plonk_verifier::loader::halo2::{EccInstructions, IntegerInstructions};
+    use snark_verifier::loader::halo2::{EccInstructions, IntegerInstructions};
 
     use super::*;
 
@@ -663,7 +660,7 @@ mod recursion {
                         region,
                         ContextParams {
                             max_rows,
-                            num_advice: vec![config.base_field_config.range.gate.num_advice],
+                            num_context_ids: 1,
                             fixed_columns: config.base_field_config.range.gate.constants.clone(),
                         },
                     );
@@ -813,11 +810,7 @@ mod recursion {
         }
 
         fn selectors(config: &Self::Config) -> Vec<Selector> {
-            config
-                .base_field_config
-                .range
-                .gate
-                .basic_gates
+            config.base_field_config.range.gate.basic_gates[0]
                 .iter()
                 .map(|gate| gate.q_enable)
                 .collect()
