@@ -11,7 +11,6 @@ use crate::{
         transcript::TranscriptRead,
         Itertools,
     },
-    Error,
 };
 
 #[derive(Clone, Debug)]
@@ -29,7 +28,7 @@ where
         _: &Self::SuccinctVerifyingKey,
         queries: &[Query<M::Scalar>],
         transcript: &mut T,
-    ) -> Result<Self::Proof, Error>
+    ) -> Self::Proof
     where
         T: TranscriptRead<M::G1Affine, L>,
     {
@@ -42,13 +41,12 @@ where
         z: &L::LoadedScalar,
         queries: &[Query<M::Scalar, L::LoadedScalar>],
         proof: &Self::Proof,
-    ) -> Result<Self::Accumulator, Error> {
+    ) -> Self::Accumulator {
         let sets = query_sets(queries);
         let powers_of_u = &proof.u.powers(sets.len());
         let f = {
-            let powers_of_v = proof
-                .v
-                .powers(sets.iter().map(|set| set.polys.len()).max().unwrap());
+            let powers_of_v =
+                proof.v.powers(Iterator::max(sets.iter().map(|set| set.polys.len())).unwrap());
             sets.iter()
                 .map(|set| set.msm(commitments, &powers_of_v))
                 .zip(powers_of_u.iter())
@@ -63,16 +61,12 @@ where
             .zip(powers_of_u.iter())
             .map(|(w, power_of_u)| Msm::base(w) * power_of_u)
             .collect_vec();
-        let lhs = f + rhs
-            .iter()
-            .zip(z_omegas)
-            .map(|(uw, z_omega)| uw.clone() * &z_omega)
-            .sum();
+        let lhs = f + rhs.iter().zip(z_omegas).map(|(uw, z_omega)| uw.clone() * &z_omega).sum();
 
-        Ok(KzgAccumulator::new(
+        KzgAccumulator::new(
             lhs.evaluate(Some(svk.g)),
             rhs.into_iter().sum::<Msm<_, _>>().evaluate(Some(svk.g)),
-        ))
+        )
     }
 }
 
@@ -92,14 +86,14 @@ where
     C: CurveAffine,
     L: Loader<C>,
 {
-    fn read<T>(queries: &[Query<C::Scalar>], transcript: &mut T) -> Result<Self, Error>
+    fn read<T>(queries: &[Query<C::Scalar>], transcript: &mut T) -> Self
     where
         T: TranscriptRead<C, L>,
     {
         let v = transcript.squeeze_challenge();
-        let ws = transcript.read_n_ec_points(query_sets(queries).len())?;
+        let ws = transcript.read_n_ec_points(query_sets(queries).len()).unwrap();
         let u = transcript.squeeze_challenge();
-        Ok(Gwc19Proof { v, ws, u })
+        Gwc19Proof { v, ws, u }
     }
 }
 

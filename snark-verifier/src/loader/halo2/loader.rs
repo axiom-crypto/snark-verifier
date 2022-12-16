@@ -257,7 +257,7 @@ impl<'a, C: CurveAffine, EccChip: EccInstructions<'a, C>> Halo2Loader<'a, C, Ecc
 
     pub fn print_row_metering(self: &Rc<Self>) {
         for (identifier, cost) in self.row_meterings.borrow().iter() {
-            println!("{}: {}", identifier, cost);
+            println!("{identifier}: {cost}");
         }
     }
 }

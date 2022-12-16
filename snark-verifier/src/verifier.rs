@@ -2,7 +2,7 @@ use crate::{
     loader::Loader,
     pcs::{Decider, MultiOpenScheme},
     util::{arithmetic::CurveAffine, transcript::TranscriptRead},
-    Error, Protocol,
+    Protocol,
 };
 use std::fmt::Debug;
 
@@ -23,7 +23,7 @@ where
         protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         transcript: &mut T,
-    ) -> Result<Self::Proof, Error>
+    ) -> Self::Proof
     where
         T: TranscriptRead<C, L>;
 
@@ -32,7 +32,7 @@ where
         protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         proof: &Self::Proof,
-    ) -> Result<Vec<MOS::Accumulator>, Error>;
+    ) -> Vec<MOS::Accumulator>;
 
     fn verify(
         svk: &MOS::SuccinctVerifyingKey,
@@ -40,12 +40,11 @@ where
         protocol: &Protocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
         proof: &Self::Proof,
-    ) -> Result<MOS::Output, Error>
+    ) -> MOS::Output
     where
         MOS: Decider<C, L>,
     {
-        let accumulators = Self::succinct_verify(svk, protocol, instances, proof)?;
-        let output = MOS::decide_all(dk, accumulators);
-        Ok(output)
+        let accumulators = Self::succinct_verify(svk, protocol, instances, proof);
+        MOS::decide_all(dk, accumulators)
     }
 }

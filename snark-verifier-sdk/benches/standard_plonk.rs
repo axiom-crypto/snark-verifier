@@ -13,6 +13,7 @@ use rand::rngs::OsRng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use snark_verifier::loader::native::NativeLoader;
+use snark_verifier_sdk::CircuitExt;
 use snark_verifier_sdk::{
     gen_pk,
     halo2::{
@@ -87,7 +88,9 @@ mod application {
     }
 
     impl CircuitExt<Fr> for StandardPlonk {
-        fn num_instance() -> Vec<usize> {
+        fn extra_params(&self) -> Self::ExtraCircuitParams {}
+
+        fn num_instance(_: &Self::ExtraCircuitParams) -> Vec<usize> {
             vec![1]
         }
 
@@ -121,7 +124,6 @@ mod application {
                     {
                         region.assign_advice(|| "", config.a, 0, || Value::known(self.0))?;
                         region.assign_fixed(|| "", config.q_a, 0, || Value::known(-Fr::one()))?;
-
                         region.assign_advice(
                             || "",
                             config.a,
@@ -142,7 +144,6 @@ mod application {
                                 || Value::known(Fr::from(idx as u64)),
                             )?;
                         }
-
                         let a =
                             region.assign_advice(|| "", config.a, 2, || Value::known(Fr::one()))?;
                         a.copy_advice(|| "", &mut region, config.b, 3)?;
@@ -150,13 +151,8 @@ mod application {
                     }
                     #[cfg(feature = "halo2-axiom")]
                     {
-                        region.assign_advice(
-                            config.a,
-                            0,
-                            Value::known(Assigned::Trivial(self.0)),
-                        )?;
+                        region.assign_advice(config.a, 0, Value::known(self.0))?;
                         region.assign_fixed(config.q_a, 0, -Fr::one());
-
                         region.assign_advice(config.a, 1, Value::known(-Fr::from(5u64)))?;
                         for (idx, column) in (1..).zip([
                             config.q_a,

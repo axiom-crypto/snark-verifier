@@ -27,10 +27,10 @@ use std::{fs::File, rc::Rc};
 
 use super::{CircuitExt, PoseidonTranscript, Snark, SnarkWitness, POSEIDON_SPEC};
 
-type Svk = KzgSuccinctVerifyingKey<G1Affine>;
-type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
-type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
-type Shplonk = Plonk<Kzg<Bn256, Bdfg21>>;
+pub type Svk = KzgSuccinctVerifyingKey<G1Affine>;
+pub type BaseFieldEccChip = halo2_ecc::ecc::BaseFieldEccChip<G1Affine>;
+pub type Halo2Loader<'a> = loader::halo2::Halo2Loader<'a, G1Affine, BaseFieldEccChip>;
+pub type Shplonk = Plonk<Kzg<Bn256, Bdfg21>>;
 
 pub fn load_verify_circuit_degree() -> u32 {
     let path = std::env::var("VERIFY_CONFIG")
@@ -42,6 +42,7 @@ pub fn load_verify_circuit_degree() -> u32 {
     params.degree
 }
 
+#[allow(clippy::type_complexity)]
 /// Core function used in `synthesize` to aggregate multiple `snarks`.
 ///  
 /// Returns the assigned instances of previous snarks (all concatenated together) and the new final pair that needs to be verified in a pairing check
@@ -88,10 +89,8 @@ where
             // read the transcript and perform Fiat-Shamir
             // run through verification computation and produce the final pair `succinct`
             transcript.new_stream(snark.proof());
-            let proof =
-                Plonk::<PCS>::read_proof(svk, &protocol, &instances, &mut transcript).unwrap();
-            let accumulator =
-                Plonk::<PCS>::succinct_verify(svk, &protocol, &instances, &proof).unwrap();
+            let proof = Plonk::<PCS>::read_proof(svk, &protocol, &instances, &mut transcript);
+            let accumulator = Plonk::<PCS>::succinct_verify(svk, &protocol, &instances, &proof);
 
             previous_instances.extend(instances.into_iter().flatten());
 
@@ -203,9 +202,8 @@ impl AggregationCircuit {
                     &snark.protocol,
                     &snark.instances,
                     &mut transcript_read,
-                )
-                .unwrap();
-                Shplonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof).unwrap()
+                );
+                Shplonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof)
             })
             .collect_vec();
 
@@ -241,8 +239,16 @@ impl AggregationCircuit {
         vec![4 * LIMBS]
     }
 
-    pub fn instances(&self) -> Vec<Vec<Fr>> {
-        vec![self.instances.clone()]
+    pub fn instance(&self) -> Vec<Fr> {
+        self.instances.clone()
+    }
+
+    pub fn succinct_verifying_key(&self) -> &Svk {
+        &self.svk
+    }
+
+    pub fn snarks(&self) -> &[SnarkWitness] {
+        &self.snarks
     }
 
     pub fn as_proof(&self) -> Value<&[u8]> {
@@ -251,7 +257,8 @@ impl AggregationCircuit {
 }
 
 impl CircuitExt<Fr> for AggregationCircuit {
-    fn num_instance() -> Vec<usize> {
+    fn extra_params(&self) -> Self::ExtraCircuitParams {}
+    fn num_instance(_: &()) -> Vec<usize> {
         // [..lhs, ..rhs]
         vec![4 * LIMBS]
     }
@@ -338,7 +345,7 @@ impl Circuit<Fr> for AggregationCircuit {
                 #[cfg(feature = "display")]
                 println!("Total advice cells: {}", loader.ctx().total_advice);
                 #[cfg(feature = "display")]
-                println!("Advice columns used: {}", loader.ctx().advice_alloc[0][0].0 + 1);
+                println!("Advice columns used: {}", loader.ctx().advice_alloc[0].0 + 1);
 
                 assigned_instances = lhs
                     .x
@@ -348,16 +355,7 @@ impl Circuit<Fr> for AggregationCircuit {
                     .chain(lhs.y.truncation.limbs.iter())
                     .chain(rhs.x.truncation.limbs.iter())
                     .chain(rhs.y.truncation.limbs.iter())
-                    .map(|assigned| {
-                        #[cfg(feature = "halo2-axiom")]
-                        {
-                            *assigned.cell()
-                        }
-                        #[cfg(feature = "halo2-pse")]
-                        {
-                            assigned.cell()
-                        }
-                    })
+                    .map(|assigned| assigned.cell().clone())
                     .collect_vec();
                 #[cfg(feature = "display")]
                 end_timer!(witness_time);

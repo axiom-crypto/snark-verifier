@@ -42,9 +42,8 @@ macro_rules! halo2_kzg_evm_verify {
             let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
             let instances = transcript
                 .load_instances($instances.iter().map(|instances| instances.len()).collect_vec());
-            let proof = <$plonk_verifier>::read_proof(&svk, &protocol, &instances, &mut transcript)
-                .unwrap();
-            <$plonk_verifier>::verify(&svk, &dk, &protocol, &instances, &proof).unwrap();
+            let proof = <$plonk_verifier>::read_proof(&svk, &protocol, &instances, &mut transcript);
+            <$plonk_verifier>::verify(&svk, &dk, &protocol, &instances, &proof);
 
             compile_yul(&loader.yul_code())
         };

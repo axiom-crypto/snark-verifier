@@ -46,7 +46,7 @@ where
         svk: &Self::SuccinctVerifyingKey,
         queries: &[Query<C::Scalar>],
         transcript: &mut T,
-    ) -> Result<Self::Proof, Error>
+    ) -> Self::Proof
     where
         T: TranscriptRead<C, L>;
 
@@ -56,7 +56,7 @@ where
         point: &L::LoadedScalar,
         queries: &[Query<C::Scalar, L::LoadedScalar>],
         proof: &Self::Proof,
-    ) -> Result<Self::Accumulator, Error>;
+    ) -> Self::Accumulator;
 }
 
 pub trait Decider<C, L>: PolynomialCommitmentScheme<C, L>

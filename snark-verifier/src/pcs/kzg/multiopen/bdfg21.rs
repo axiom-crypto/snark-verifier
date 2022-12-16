@@ -11,7 +11,6 @@ use crate::{
         transcript::TranscriptRead,
         Itertools,
     },
-    Error,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -33,7 +32,7 @@ where
         _: &KzgSuccinctVerifyingKey<M::G1Affine>,
         _: &[Query<M::Scalar>],
         transcript: &mut T,
-    ) -> Result<Bdfg21Proof<M::G1Affine, L>, Error>
+    ) -> Bdfg21Proof<M::G1Affine, L>
     where
         T: TranscriptRead<M::G1Affine, L>,
     {
@@ -46,14 +45,13 @@ where
         z: &L::LoadedScalar,
         queries: &[Query<M::Scalar, L::LoadedScalar>],
         proof: &Bdfg21Proof<M::G1Affine, L>,
-    ) -> Result<Self::Accumulator, Error> {
+    ) -> Self::Accumulator {
         let sets = query_sets(queries);
         let f = {
             let coeffs = query_set_coeffs(&sets, z, &proof.z_prime);
 
-            let powers_of_mu = proof
-                .mu
-                .powers(sets.iter().map(|set| set.polys.len()).max().unwrap());
+            let powers_of_mu =
+                proof.mu.powers(Iterator::max(sets.iter().map(|set| set.polys.len())).unwrap());
             let msms = sets
                 .iter()
                 .zip(coeffs.iter())
@@ -68,10 +66,7 @@ where
         let rhs = Msm::base(&proof.w_prime);
         let lhs = f + rhs.clone() * &proof.z_prime;
 
-        Ok(KzgAccumulator::new(
-            lhs.evaluate(Some(svk.g)),
-            rhs.evaluate(Some(svk.g)),
-        ))
+        KzgAccumulator::new(lhs.evaluate(Some(svk.g)), rhs.evaluate(Some(svk.g)))
     }
 }
 
@@ -93,30 +88,20 @@ where
     C: CurveAffine,
     L: Loader<C>,
 {
-    fn read<T: TranscriptRead<C, L>>(transcript: &mut T) -> Result<Self, Error> {
+    fn read<T: TranscriptRead<C, L>>(transcript: &mut T) -> Self {
         let mu = transcript.squeeze_challenge();
         let gamma = transcript.squeeze_challenge();
-        let w = transcript.read_ec_point()?;
+        let w = transcript.read_ec_point().unwrap();
         let z_prime = transcript.squeeze_challenge();
-        let w_prime = transcript.read_ec_point()?;
-        Ok(Bdfg21Proof {
-            mu,
-            gamma,
-            w,
-            z_prime,
-            w_prime,
-        })
+        let w_prime = transcript.read_ec_point().unwrap();
+        Bdfg21Proof { mu, gamma, w, z_prime, w_prime }
     }
 }
 
 fn query_sets<F: FieldExt, T: Clone>(queries: &[Query<F, T>]) -> Vec<QuerySet<F, T>> {
-    let poly_shifts = queries.iter().fold(
-        Vec::<(usize, Vec<F>, Vec<&T>)>::new(),
-        |mut poly_shifts, query| {
-            if let Some(pos) = poly_shifts
-                .iter()
-                .position(|(poly, _, _)| *poly == query.poly)
-            {
+    let poly_shifts =
+        queries.iter().fold(Vec::<(usize, Vec<F>, Vec<&T>)>::new(), |mut poly_shifts, query| {
+            if let Some(pos) = poly_shifts.iter().position(|(poly, _, _)| *poly == query.poly) {
                 let (_, shifts, evals) = &mut poly_shifts[pos];
                 if !shifts.contains(&query.shift) {
                     shifts.push(query.shift);
@@ -126,39 +111,31 @@ fn query_sets<F: FieldExt, T: Clone>(queries: &[Query<F, T>]) -> Vec<QuerySet<F,
                 poly_shifts.push((query.poly, vec![query.shift], vec![&query.eval]));
             }
             poly_shifts
-        },
-    );
+        });
 
-    poly_shifts.into_iter().fold(
-        Vec::<QuerySet<F, T>>::new(),
-        |mut sets, (poly, shifts, evals)| {
-            if let Some(pos) = sets.iter().position(|set| {
-                BTreeSet::from_iter(set.shifts.iter()) == BTreeSet::from_iter(shifts.iter())
-            }) {
-                let set = &mut sets[pos];
-                if !set.polys.contains(&poly) {
-                    set.polys.push(poly);
-                    set.evals.push(
-                        set.shifts
-                            .iter()
-                            .map(|lhs| {
-                                let idx = shifts.iter().position(|rhs| lhs == rhs).unwrap();
-                                evals[idx]
-                            })
-                            .collect(),
-                    );
-                }
-            } else {
-                let set = QuerySet {
-                    shifts,
-                    polys: vec![poly],
-                    evals: vec![evals],
-                };
-                sets.push(set);
+    poly_shifts.into_iter().fold(Vec::<QuerySet<F, T>>::new(), |mut sets, (poly, shifts, evals)| {
+        if let Some(pos) = sets.iter().position(|set| {
+            BTreeSet::from_iter(set.shifts.iter()) == BTreeSet::from_iter(shifts.iter())
+        }) {
+            let set = &mut sets[pos];
+            if !set.polys.contains(&poly) {
+                set.polys.push(poly);
+                set.evals.push(
+                    set.shifts
+                        .iter()
+                        .map(|lhs| {
+                            let idx = shifts.iter().position(|rhs| lhs == rhs).unwrap();
+                            evals[idx]
+                        })
+                        .collect(),
+                );
             }
-            sets
-        },
-    )
+        } else {
+            let set = QuerySet { shifts, polys: vec![poly], evals: vec![evals] };
+            sets.push(set);
+        }
+        sets
+    })
 }
 
 fn query_set_coeffs<'a, F: FieldExt, T: LoadedScalar<F>>(
@@ -168,22 +145,15 @@ fn query_set_coeffs<'a, F: FieldExt, T: LoadedScalar<F>>(
 ) -> Vec<QuerySetCoeff<F, T>> {
     let loader = z.loader();
 
-    let superset = sets
-        .iter()
-        .flat_map(|set| set.shifts.clone())
-        .sorted()
-        .dedup();
+    let superset = sets.iter().flat_map(|set| set.shifts.clone()).sorted().dedup();
 
     let size = 2.max(
         ilog2((sets.iter().map(|set| set.shifts.len()).max().unwrap() - 1).next_power_of_two()) + 1,
     );
     let powers_of_z = z.powers(size);
-    let z_prime_minus_z_shift_i = BTreeMap::from_iter(superset.map(|shift| {
-        (
-            shift,
-            z_prime.clone() - z.clone() * loader.load_const(&shift),
-        )
-    }));
+    let z_prime_minus_z_shift_i = BTreeMap::from_iter(
+        superset.map(|shift| (shift, z_prime.clone() - z.clone() * loader.load_const(&shift))),
+    );
 
     let mut z_s_1 = None;
     let mut coeffs = sets
@@ -295,7 +265,7 @@ where
                 .iter()
                 .enumerate()
                 .skip(1)
-                .filter_map(|(i, power_of_z)| (k_minus_one & (1 << i) == 1).then(|| power_of_z))
+                .filter_map(|(i, power_of_z)| (k_minus_one & (1 << i) == 1).then_some(power_of_z))
                 .fold(loader.load_one(), |acc, value| acc * value)
         };
 
@@ -312,10 +282,7 @@ where
             .collect_vec();
 
         let z_s = loader.product(
-            &shifts
-                .iter()
-                .map(|shift| z_prime_minus_z_shift_i.get(shift).unwrap())
-                .collect_vec(),
+            &shifts.iter().map(|shift| z_prime_minus_z_shift_i.get(shift).unwrap()).collect_vec(),
         );
         let z_s_1_over_z_s = z_s_1.clone().map(|z_s_1| Fraction::new(z_s_1, z_s.clone()));
 
@@ -344,13 +311,8 @@ where
                 .iter_mut()
                 .chain(self.commitment_coeff.as_mut())
                 .for_each(Fraction::evaluate);
-            let barycentric_weights_sum = loader.sum(
-                &self
-                    .eval_coeffs
-                    .iter()
-                    .map(Fraction::evaluated)
-                    .collect_vec(),
-            );
+            let barycentric_weights_sum =
+                loader.sum(&self.eval_coeffs.iter().map(Fraction::evaluated).collect_vec());
             self.r_eval_coeff = Some(match self.commitment_coeff.as_ref() {
                 Some(coeff) => Fraction::new(coeff.evaluated().clone(), barycentric_weights_sum),
                 None => Fraction::one_over(barycentric_weights_sum),

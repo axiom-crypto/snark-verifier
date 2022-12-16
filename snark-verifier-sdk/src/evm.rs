@@ -108,6 +108,7 @@ pub fn gen_evm_proof_shplonk<'params, C: Circuit<Fr>>(
 pub fn gen_evm_verifier<C, PCS>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
+    extra_circuit_params: &C::ExtraCircuitParams,
     path: Option<&Path>,
 ) -> Vec<u8>
 where
@@ -128,7 +129,7 @@ where
         params,
         vk,
         Config::kzg()
-            .with_num_instance(C::num_instance())
+            .with_num_instance(C::num_instance(extra_circuit_params))
             .with_accumulator_indices(C::accumulator_indices()),
     );
 
@@ -136,9 +137,9 @@ where
     let protocol = protocol.loaded(&loader);
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
-    let instances = transcript.load_instances(C::num_instance());
-    let proof = Plonk::<PCS>::read_proof(&svk, &protocol, &instances, &mut transcript).unwrap();
-    Plonk::<PCS>::verify(&svk, &dk, &protocol, &instances, &proof).unwrap();
+    let instances = transcript.load_instances(C::num_instance(extra_circuit_params));
+    let proof = Plonk::<PCS>::read_proof(&svk, &protocol, &instances, &mut transcript);
+    Plonk::<PCS>::verify(&svk, &dk, &protocol, &instances, &proof);
 
     let yul_code = loader.yul_code();
     let byte_code = compile_yul(&yul_code);
@@ -152,17 +153,19 @@ where
 pub fn gen_evm_verifier_gwc<C: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
+    extra_circuit_params: &C::ExtraCircuitParams,
     path: Option<&Path>,
 ) -> Vec<u8> {
-    gen_evm_verifier::<C, Kzg<Bn256, Gwc19>>(params, vk, path)
+    gen_evm_verifier::<C, Kzg<Bn256, Gwc19>>(params, vk, extra_circuit_params, path)
 }
 
 pub fn gen_evm_verifier_shplonk<C: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
+    extra_circuit_params: &C::ExtraCircuitParams,
     path: Option<&Path>,
 ) -> Vec<u8> {
-    gen_evm_verifier::<C, Kzg<Bn256, Bdfg21>>(params, vk, path)
+    gen_evm_verifier::<C, Kzg<Bn256, Bdfg21>>(params, vk, extra_circuit_params, path)
 }
 
 pub fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {

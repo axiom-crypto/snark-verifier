@@ -62,7 +62,7 @@ lazy_static! {
 
 /// Generates a native proof using either SHPLONK or GWC proving method. Uses Poseidon for Fiat-Shamir.
 ///
-/// Caches the instances and proof if `path` is specified.
+/// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_proof<'params, C, P, V>(
     params: &'params ParamsKZG<Bn256>,
     pk: &'params ProvingKey<G1Affine>,
@@ -142,7 +142,7 @@ where
 
 /// Generates a native proof using original Plonk (GWC '19) multi-open scheme. Uses Poseidon for Fiat-Shamir.
 ///
-/// Caches the instances and proof if `path` is specified.
+/// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_proof_gwc<C: Circuit<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
@@ -176,7 +176,7 @@ pub fn gen_proof_shplonk<C: Circuit<Fr>>(
 
 /// Generates a SNARK using either SHPLONK or GWC multi-open scheme. Uses Poseidon for Fiat-Shamir.
 ///
-/// Caches the instances and proof if `path` is specified.
+/// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_snark<'params, ConcreteCircuit, P, V>(
     params: &'params ParamsKZG<Bn256>,
     pk: &'params ProvingKey<G1Affine>,
@@ -199,7 +199,7 @@ where
         params,
         pk.get_vk(),
         Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance())
+            .with_num_instance(ConcreteCircuit::num_instance(&circuit.extra_params()))
             .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
     );
 
@@ -219,7 +219,7 @@ where
 
 /// Generates a SNARK using GWC multi-open scheme. Uses Poseidon for Fiat-Shamir.
 ///
-/// Caches the instances and proof if `path` is specified.
+/// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
@@ -235,7 +235,7 @@ pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
 
 /// Generates a SNARK using SHPLONK multi-open scheme. Uses Poseidon for Fiat-Shamir.
 ///
-/// Caches the instances and proof if `path` is specified.
+/// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
@@ -252,6 +252,7 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
 pub fn gen_dummy_snark<ConcreteCircuit, MOS>(
     params: &ParamsKZG<Bn256>,
     vk: Option<&VerifyingKey<G1Affine>>,
+    extra_params: &ConcreteCircuit::ExtraCircuitParams,
 ) -> Snark
 where
     ConcreteCircuit: CircuitExt<Fr>,
@@ -299,10 +300,10 @@ where
         params,
         vk.or(dummy_vk.as_ref()).unwrap(),
         Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance())
+            .with_num_instance(ConcreteCircuit::num_instance(extra_params))
             .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
     );
-    let instances = ConcreteCircuit::num_instance()
+    let instances = ConcreteCircuit::num_instance(extra_params)
         .into_iter()
         .map(|n| iter::repeat(Fr::default()).take(n).collect())
         .collect();

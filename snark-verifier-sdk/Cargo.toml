@@ -44,8 +44,8 @@ crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = ["loader_evm", "loader_halo2", "zkevm", "halo2-pse", "halo2-base/jemallocator"]
-display = ["snark-verifier/display"]
+default = ["loader_halo2", "loader_evm", "halo2-axiom", "halo2-base/jemallocator"]
+display = ["snark-verifier/display", "ark-std"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 loader_halo2 = ["snark-verifier/loader_halo2"]
 parallel = ["snark-verifier/parallel"]

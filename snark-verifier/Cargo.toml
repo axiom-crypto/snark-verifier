@@ -11,6 +11,7 @@ num-integer = "0.1.45"
 num-traits = "0.2.15"
 hex = "0.4"
 rand = "0.8"
+rustc-hash = "1.1.0"
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 halo2-base = { git = "ssh://github.com/axiom-crypto/axiom-core-working.git", branch = "experiment/optimizations", default-features = false }
@@ -39,7 +40,7 @@ crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = ["loader_evm", "loader_halo2", "halo2-pse"]
+default = ["loader_evm", "loader_halo2", "halo2-axiom"]
 display = ["halo2-base/display", "halo2-ecc?/display"]
 loader_evm = ["dep:ethereum-types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
 loader_halo2 = ["halo2-ecc"]

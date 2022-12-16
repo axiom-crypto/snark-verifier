@@ -16,6 +16,7 @@ use snark_verifier_sdk::{
         aggregation::load_verify_circuit_degree, aggregation::AggregationCircuit, gen_proof_gwc,
         gen_proof_shplonk, gen_snark_shplonk, PoseidonTranscript, POSEIDON_SPEC,
     },
+    CircuitExt,
 };
 use std::env::{set_var, var};
 use std::path::Path;

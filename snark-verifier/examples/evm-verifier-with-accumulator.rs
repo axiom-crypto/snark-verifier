@@ -202,7 +202,7 @@ mod application {
 mod aggregation {
     use super::halo2_proofs::{
         circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
-        plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
+        plonk::{self, Circuit, Column, ConstraintSystem, Instance},
         poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
     };
     use super::{As, Plonk, BITS, LIMBS};
@@ -309,8 +309,8 @@ mod aggregation {
                 let instances = assign_instances(&snark.instances);
                 let mut transcript =
                     PoseidonTranscript::<Rc<Halo2Loader>, _>::new(loader, snark.proof());
-                let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript).unwrap();
-                Plonk::succinct_verify(svk, &protocol, &instances, &proof).unwrap()
+                let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript);
+                Plonk::succinct_verify(svk, &protocol, &instances, &proof)
             })
             .collect_vec();
 
@@ -397,9 +397,8 @@ mod aggregation {
                     let mut transcript =
                         PoseidonTranscript::<NativeLoader, _>::new(snark.proof.as_slice());
                     let proof =
-                        Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript)
-                            .unwrap();
-                    Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof).unwrap()
+                        Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript);
+                    Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof)
                 })
                 .collect_vec();
 
@@ -624,8 +623,8 @@ fn gen_aggregation_evm_verifier(
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
     let instances = transcript.load_instances(num_instance);
-    let proof = Plonk::read_proof(&svk, &protocol, &instances, &mut transcript).unwrap();
-    Plonk::verify(&svk, &dk, &protocol, &instances, &proof).unwrap();
+    let proof = Plonk::read_proof(&svk, &protocol, &instances, &mut transcript);
+    Plonk::verify(&svk, &dk, &protocol, &instances, &proof);
 
     evm::compile_yul(&loader.yul_code())
 }

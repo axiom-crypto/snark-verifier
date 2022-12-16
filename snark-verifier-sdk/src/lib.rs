@@ -1,3 +1,4 @@
+#![feature(associated_type_defaults)]
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
@@ -11,6 +12,7 @@ use halo2_proofs::{
     poly::kzg::commitment::ParamsKZG,
 };
 use itertools::Itertools;
+pub use snark_verifier::loader::native::NativeLoader;
 use snark_verifier::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 use std::{
     fs::{self, File},
@@ -81,7 +83,14 @@ impl SnarkWitness {
 }
 
 pub trait CircuitExt<F: Field>: Circuit<F> {
-    fn num_instance() -> Vec<usize>;
+    /// Due to limitations of Rust generics, we provide a helper type to hold extra parameters that may determine a circuit
+    type ExtraCircuitParams = ();
+
+    /// The extra parameters should be derivable from any circuit instance
+    fn extra_params(&self) -> Self::ExtraCircuitParams;
+
+    /// Return the number of instances of the circuit. This may depend on extra circuit parameters but NOT on private witnesses.
+    fn num_instance(params: &Self::ExtraCircuitParams) -> Vec<usize>;
 
     fn instances(&self) -> Vec<Vec<F>>;
 
@@ -95,6 +104,7 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
     }
 }
 
+#[allow(clippy::let_and_return)]
 pub fn gen_pk<C: Circuit<Fr>>(
     params: &ParamsKZG<Bn256>,
     circuit: &C,

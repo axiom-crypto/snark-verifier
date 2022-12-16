@@ -150,8 +150,8 @@ pub fn accumulate<'a>(
             let instances = assign_instances(&snark.instances);
             let mut transcript =
                 PoseidonTranscript::<Rc<Halo2Loader>, _>::new(loader, snark.proof());
-            let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript).unwrap();
-            Plonk::succinct_verify(svk, &protocol, &instances, &proof).unwrap()
+            let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript);
+            Plonk::succinct_verify(svk, &protocol, &instances, &proof)
         })
         .collect_vec();
 
@@ -192,9 +192,8 @@ impl Accumulation {
                 let mut transcript =
                     PoseidonTranscript::<NativeLoader, _>::new(snark.proof.as_slice());
                 let proof =
-                    Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript)
-                        .unwrap();
-                Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof).unwrap()
+                    Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript);
+                Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof)
             })
             .collect_vec();
 

@@ -399,8 +399,8 @@ mod recursion {
             })
             .collect_vec();
         let mut transcript = PoseidonTranscript::<Rc<Halo2Loader>, _>::new(loader, snark.proof());
-        let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript).unwrap();
-        let accumulators = Plonk::succinct_verify(svk, &protocol, &instances, &proof).unwrap();
+        let proof = Plonk::read_proof(svk, &protocol, &instances, &mut transcript);
+        let accumulators = Plonk::succinct_verify(svk, &protocol, &instances, &proof);
 
         (
             instances
@@ -532,9 +532,8 @@ mod recursion {
                 let mut transcript =
                     PoseidonTranscript::<NativeLoader, _>::new(snark.proof.as_slice());
                 let proof =
-                    Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript)
-                        .unwrap();
-                Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof).unwrap()
+                    Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript);
+                Plonk::succinct_verify(&svk, &snark.protocol, &snark.instances, &proof)
             };
 
             let accumulators = iter::empty()
@@ -899,9 +898,8 @@ fn main() {
         let svk = recursion_params.get_g()[0].into();
         let dk = (recursion_params.g2(), recursion_params.s_g2()).into();
         let mut transcript = PoseidonTranscript::<NativeLoader, _>::new(snark.proof.as_slice());
-        let proof =
-            Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript).unwrap();
-        Plonk::verify(&svk, &dk, &snark.protocol, &snark.instances, &proof).unwrap()
+        let proof = Plonk::read_proof(&svk, &snark.protocol, &snark.instances, &mut transcript);
+        Plonk::verify(&svk, &dk, &snark.protocol, &snark.instances, &proof)
     };
     assert!(accept)
 }

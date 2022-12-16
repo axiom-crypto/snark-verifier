@@ -236,8 +236,8 @@ fn gen_evm_verifier(
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
     let instances = transcript.load_instances(num_instance);
-    let proof = Plonk::read_proof(&svk, &protocol, &instances, &mut transcript).unwrap();
-    Plonk::verify(&svk, &dk, &protocol, &instances, &proof).unwrap();
+    let proof = Plonk::read_proof(&svk, &protocol, &instances, &mut transcript);
+    Plonk::verify(&svk, &dk, &protocol, &instances, &proof);
 
     evm::compile_yul(&loader.yul_code())
 }
