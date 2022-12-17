@@ -1,6 +1,7 @@
 use crate::util::Itertools;
 use num_bigint::BigUint;
 use num_traits::One;
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     fmt::Debug,
@@ -79,7 +80,7 @@ pub fn root_of_unity<F: PrimeField>(k: usize) -> F {
         .unwrap()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Rotation(pub i32);
 
 impl Rotation {
@@ -102,7 +103,7 @@ impl From<i32> for Rotation {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Domain<F: PrimeField> {
     pub k: usize,
     pub n: usize,

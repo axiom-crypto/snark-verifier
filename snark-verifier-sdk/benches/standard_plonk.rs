@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
@@ -183,7 +185,7 @@ fn gen_application_snark(
     let circuit = application::StandardPlonk::rand(OsRng);
 
     let pk = gen_pk(params, &circuit, None);
-    gen_snark_shplonk(params, &pk, circuit, transcript, &mut OsRng, None)
+    gen_snark_shplonk(params, &pk, circuit, transcript, &mut OsRng, None::<&str>)
 }
 
 fn bench(c: &mut Criterion) {

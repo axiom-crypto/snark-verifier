@@ -113,7 +113,7 @@ fn bench(c: &mut Criterion) {
     #[cfg(feature = "loader_evm")]
     {
         let deployment_code =
-            gen_evm_verifier_shplonk::<AggregationCircuit>(&params, pk.get_vk(), None);
+            gen_evm_verifier_shplonk::<AggregationCircuit>(&params, pk.get_vk(), &(), None::<&str>);
 
         let start2 = start_timer!(|| "Create EVM proof");
         let proof = gen_evm_proof_shplonk(

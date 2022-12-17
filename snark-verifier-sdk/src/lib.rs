@@ -1,7 +1,7 @@
 #![feature(associated_type_defaults)]
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
-use halo2_base::halo2_proofs;
+use halo2_base::{halo2_proofs, utils::fs::gen_srs};
 use halo2_proofs::{
     circuit::Value,
     halo2curves::{
@@ -12,9 +12,11 @@ use halo2_proofs::{
     poly::kzg::commitment::ParamsKZG,
 };
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 pub use snark_verifier::loader::native::NativeLoader;
 use snark_verifier::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 use std::{
+    borrow::Cow,
     fs::{self, File},
     io::{BufReader, BufWriter},
     path::Path,
@@ -25,12 +27,13 @@ pub mod evm;
 #[cfg(feature = "loader_halo2")]
 pub mod halo2;
 
-const LIMBS: usize = 3;
-const BITS: usize = 88;
+pub const LIMBS: usize = 3;
+pub const BITS: usize = 88;
 
 /// PCS be either `Kzg<Bn256, Gwc19>` or `Kzg<Bn256, Bdfg21>`
 pub type Plonk<PCS> = verifier::Plonk<PCS, LimbsEncoding<LIMBS, BITS>>;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snark {
     pub protocol: Protocol<G1Affine>,
     pub instances: Vec<Vec<Fr>>,
@@ -57,7 +60,7 @@ impl From<Snark> for SnarkWitness {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SnarkWitness {
     pub protocol: Protocol<G1Affine>,
     pub instances: Vec<Vec<Value<Fr>>>,
@@ -106,61 +109,47 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
 
 #[allow(clippy::let_and_return)]
 pub fn gen_pk<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bn256>, // TODO: read pk without params
     circuit: &C,
     path: Option<&Path>,
 ) -> ProvingKey<G1Affine> {
     if let Some(path) = path {
-        match File::open(path) {
-            Ok(f) => {
-                #[cfg(feature = "display")]
-                let read_time = start_timer!(|| format!("Reading pkey from {path:?}"));
+        if let Ok(f) = File::open(path) {
+            #[cfg(feature = "display")]
+            let read_time = start_timer!(|| format!("Reading pkey from {path:?}"));
 
-                // TODO: bench if BufReader is indeed faster than Read
-                let mut bufreader = BufReader::new(f);
-                let pk = ProvingKey::read::<_, C>(&mut bufreader, params)
-                    .expect("Reading pkey should not fail");
+            // TODO: bench if BufReader is indeed faster than Read
+            let mut bufreader = BufReader::new(f);
+            let pk = ProvingKey::read::<_, C>(&mut bufreader, params)
+                .expect("Reading pkey should not fail");
 
-                #[cfg(feature = "display")]
-                end_timer!(read_time);
+            #[cfg(feature = "display")]
+            end_timer!(read_time);
 
-                pk
-            }
-            Err(_) => {
-                #[cfg(feature = "display")]
-                let pk_time = start_timer!(|| "Generating vkey & pkey");
-
-                let vk = keygen_vk(params, circuit).unwrap();
-                let pk = keygen_pk(params, vk, circuit).unwrap();
-
-                #[cfg(feature = "display")]
-                end_timer!(pk_time);
-
-                #[cfg(feature = "display")]
-                let write_time = start_timer!(|| format!("Writing pkey to {path:?}"));
-
-                path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
-                let mut f = BufWriter::new(File::create(path).unwrap());
-                pk.write(&mut f).unwrap();
-
-                #[cfg(feature = "display")]
-                end_timer!(write_time);
-
-                pk
-            }
+            return pk;
         }
-    } else {
-        #[cfg(feature = "display")]
-        let pk_time = start_timer!(|| "Generating vkey & pkey");
-
-        let vk = keygen_vk(params, circuit).unwrap();
-        let pk = keygen_pk(params, vk, circuit).unwrap();
-
-        #[cfg(feature = "display")]
-        end_timer!(pk_time);
-
-        pk
     }
+    #[cfg(feature = "display")]
+    let pk_time = start_timer!(|| "Generating vkey & pkey");
+
+    let vk = keygen_vk(params, circuit).unwrap();
+    let pk = keygen_pk(params, vk, circuit).unwrap();
+
+    #[cfg(feature = "display")]
+    end_timer!(pk_time);
+
+    if let Some(path) = path {
+        #[cfg(feature = "display")]
+        let write_time = start_timer!(|| format!("Writing pkey to {path:?}"));
+
+        path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
+        let mut f = BufWriter::new(File::create(path).unwrap());
+        pk.write(&mut f).unwrap();
+
+        #[cfg(feature = "display")]
+        end_timer!(write_time);
+    }
+    pk
 }
 
 pub fn read_instances(path: impl AsRef<Path>) -> Result<Vec<Vec<Fr>>, bincode::Error> {

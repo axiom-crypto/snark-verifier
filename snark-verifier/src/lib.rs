@@ -12,6 +12,8 @@ pub mod verifier;
 pub(crate) use halo2_base::halo2_proofs;
 pub(crate) use halo2_base::poseidon;
 pub(crate) use halo2_proofs::halo2curves as halo2_curves;
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -23,14 +25,22 @@ pub enum Error {
     Transcript(std::io::ErrorKind, String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Protocol<C, L = loader::native::NativeLoader>
 where
     C: util::arithmetic::CurveAffine,
     L: loader::Loader<C>,
 {
     // Common description
+    #[serde(bound(
+        serialize = "C::Scalar: Serialize",
+        deserialize = "C::Scalar: Deserialize<'de>"
+    ))]
     pub domain: util::arithmetic::Domain<C::Scalar>,
+    #[serde(bound(
+        serialize = "L::LoadedEcPoint: Serialize",
+        deserialize = "L::LoadedEcPoint: Deserialize<'de>"
+    ))]
     pub preprocessed: Vec<L::LoadedEcPoint>,
     pub num_instance: Vec<usize>,
     pub num_witness: Vec<usize>,
@@ -39,6 +49,10 @@ where
     pub queries: Vec<util::protocol::Query>,
     pub quotient: util::protocol::QuotientPolynomial<C::Scalar>,
     // Minor customization
+    #[serde(bound(
+        serialize = "L::LoadedScalar: Serialize",
+        deserialize = "L::LoadedScalar: Deserialize<'de>"
+    ))]
     pub transcript_initial_state: Option<L::LoadedScalar>,
     pub instance_committing_key: Option<util::protocol::InstanceCommittingKey<C>>,
     pub linearization: Option<util::protocol::LinearizationStrategy>,

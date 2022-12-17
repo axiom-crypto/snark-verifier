@@ -13,7 +13,10 @@ use rand::Rng;
 use snark_verifier::{
     loader::{
         self,
-        halo2::halo2_ecc::{self, ecc::EccChip},
+        halo2::{
+            halo2_ecc::{self, ecc::EccChip},
+            EccInstructions,
+        },
         native::NativeLoader,
     },
     pcs::{
@@ -52,7 +55,7 @@ pub fn aggregate<'a, PCS>(
     snarks: &[SnarkWitness],
     as_proof: Value<&'_ [u8]>,
 ) -> (
-    Vec<loader::halo2::Scalar<'a, G1Affine, BaseFieldEccChip>>,
+    Vec<<BaseFieldEccChip as EccInstructions<'a, G1Affine>>::AssignedScalar>,
     KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
 )
 where
@@ -72,7 +75,7 @@ where
     };
 
     // TODO pre-allocate capacity better
-    let mut previous_instances = vec![];
+    let mut previous_instances = Vec::new();
     let mut transcript = PoseidonTranscript::<Rc<Halo2Loader<'a>>, _>::from_spec(
         loader,
         Value::unknown(),
@@ -92,7 +95,8 @@ where
             let proof = Plonk::<PCS>::read_proof(svk, &protocol, &instances, &mut transcript);
             let accumulator = Plonk::<PCS>::succinct_verify(svk, &protocol, &instances, &proof);
 
-            previous_instances.extend(instances.into_iter().flatten());
+            previous_instances
+                .extend(instances.into_iter().flatten().map(|scalar| scalar.into_assigned()));
 
             accumulator
         })

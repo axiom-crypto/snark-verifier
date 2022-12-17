@@ -8,6 +8,7 @@ use crate::{
 };
 use num_integer::Integer;
 use num_traits::One;
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
     collections::{BTreeMap, BTreeSet},
@@ -47,7 +48,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum CommonPolynomial {
     Identity,
     Lagrange(i32),
@@ -141,7 +142,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuotientPolynomial<F: Clone> {
     pub chunk_degree: usize,
     pub numerator: Expression<F>,
@@ -153,7 +154,7 @@ impl<F: Clone> QuotientPolynomial<F> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Query {
     pub poly: usize,
     pub rotation: Rotation,
@@ -161,14 +162,11 @@ pub struct Query {
 
 impl Query {
     pub fn new<R: Into<Rotation>>(poly: usize, rotation: R) -> Self {
-        Self {
-            poly,
-            rotation: rotation.into(),
-        }
+        Self { poly, rotation: rotation.into() }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Expression<F> {
     Constant(F),
     CommonPolynomial(CommonPolynomial),
@@ -194,16 +192,7 @@ impl<F: Clone> Expression<F> {
         scaled: &impl Fn(T, F) -> T,
     ) -> T {
         let evaluate = |expr: &Expression<F>| {
-            expr.evaluate(
-                constant,
-                common_poly,
-                poly,
-                challenge,
-                negated,
-                sum,
-                product,
-                scaled,
-            )
+            expr.evaluate(constant, common_poly, poly, challenge, negated, sum, product, scaled)
         };
         match self {
             Expression::Constant(scalar) => constant(scalar.clone()),
@@ -236,9 +225,7 @@ impl<F: Clone> Expression<F> {
                 let mut exprs = exprs.iter();
                 let first = evaluate(exprs.next().unwrap());
                 let scalar = evaluate(scalar);
-                exprs.fold(first, |acc, expr| {
-                    sum(product(acc, scalar.clone()), evaluate(expr))
-                })
+                exprs.fold(first, |acc, expr| sum(product(acc, scalar.clone()), evaluate(expr)))
             }
         }
     }
@@ -253,12 +240,9 @@ impl<F: Clone> Expression<F> {
             Expression::Sum(a, b) => max(a.degree(), b.degree()),
             Expression::Product(a, b) => a.degree() + b.degree(),
             Expression::Scaled(a, _) => a.degree(),
-            Expression::DistributePowers(a, b) => a
-                .iter()
-                .chain(Some(b.as_ref()))
-                .map(Self::degree)
-                .max()
-                .unwrap_or_default(),
+            Expression::DistributePowers(a, b) => {
+                a.iter().chain(Some(b.as_ref())).map(Self::degree).max().unwrap_or_default()
+            }
         }
     }
 
@@ -356,8 +340,7 @@ impl<F: Clone> Neg for &Expression<F> {
 
 impl<F: Clone + Default> Sum for Expression<F> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.reduce(|acc, item| acc + item)
-            .unwrap_or_else(|| Expression::Constant(F::default()))
+        iter.reduce(|acc, item| acc + item).unwrap_or_else(|| Expression::Constant(F::default()))
     }
 }
 
@@ -378,7 +361,7 @@ fn merge_left_right<T: Ord>(a: Option<BTreeSet<T>>, b: Option<BTreeSet<T>>) -> O
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum LinearizationStrategy {
     /// Older linearization strategy of GWC19, which has linearization
     /// polynomial that doesn't evaluate to 0, and requires prover to send extra
@@ -390,7 +373,7 @@ pub enum LinearizationStrategy {
     MinusVanishingTimesQuotient,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct InstanceCommittingKey<C> {
     pub bases: Vec<C>,
     pub constant: Option<C>,
