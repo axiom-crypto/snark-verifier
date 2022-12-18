@@ -34,18 +34,9 @@ incremental = false
 inherits = "release"
 debug = true
 
-[patch."ssh://github.com/axiom-crypto/axiom-core-working.git"]
-halo2-base = { path = "../axiom-core-working/halo2-lib/halo2-base" }
-halo2-ecc = { path = "../axiom-core-working/halo2-lib/halo2-ecc" }
-
-[patch."https://github.com/axiom-crypto/halo2.git"]
-halo2_proofs = { path = "../halo2/halo2_proofs" }
-halo2curves = { path = "../halo2/arithmetic/curves" }
-poseidon = { path = "../halo2/primitives/poseidon" }
-
 # patch for now because PSE/halo2 has not yet updated halo2curves version, unnecessary if halo2_proofs is using latest halo2curves with Fq12 public
 [patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
-halo2curves = { path = "../halo2/arithmetic/curves" } 
+halo2curves = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/faster-witness-generation" }
 
 # patch just because we cannot patch the same repo with different tag: serialization is already in latest PSE/halo2 but not in v2022_10_22
 [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
