@@ -69,10 +69,6 @@ where
         Self { loader: loader.clone(), stream, buf }
     }
 
-    pub fn clear(&mut self) {
-        self.buf.clear();
-    }
-
     pub fn new_stream(&mut self, stream: Value<R>) {
         self.buf.clear();
         self.stream = stream;
@@ -172,13 +168,18 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
         Self { loader: NativeLoader, stream, buf: Poseidon::from_spec(&NativeLoader, spec) }
     }
 
-    pub fn clear(&mut self) {
-        self.buf.clear();
-    }
-
     pub fn new_stream(&mut self, stream: S) {
         self.buf.clear();
         self.stream = stream;
+    }
+}
+
+impl<C: CurveAffine, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize>
+    PoseidonTranscript<C, NativeLoader, Vec<u8>, T, RATE, R_F, R_P>
+{
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.stream.clear();
     }
 }
 

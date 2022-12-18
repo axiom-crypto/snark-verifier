@@ -1,7 +1,7 @@
 #![feature(associated_type_defaults)]
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
-use halo2_base::{halo2_proofs, utils::fs::gen_srs};
+use halo2_base::halo2_proofs;
 use halo2_proofs::{
     circuit::Value,
     halo2curves::{
@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 pub use snark_verifier::loader::native::NativeLoader;
 use snark_verifier::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 use std::{
-    borrow::Cow,
     fs::{self, File},
     io::{BufReader, BufWriter},
     path::Path,

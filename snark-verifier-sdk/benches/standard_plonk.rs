@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
