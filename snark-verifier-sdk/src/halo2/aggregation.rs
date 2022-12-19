@@ -1,11 +1,14 @@
 use crate::{Plonk, BITS, LIMBS};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
-use halo2_base::halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
-    halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
-    plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
-    poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
+use halo2_base::{
+    halo2_proofs::{
+        circuit::{Layouter, SimpleFloorPlanner, Value},
+        halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
+        plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
+        poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
+    },
+    utils::value_to_option,
 };
 use halo2_base::{Context, ContextParams};
 use itertools::Itertools;
@@ -126,7 +129,7 @@ pub struct AggregationConfigParams {
     pub num_limbs: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AggregationConfig {
     pub base_field_config: halo2_ecc::fields::fp::FpConfig<Fr, Fq>,
     pub instance: Column<Instance>,
@@ -235,14 +238,6 @@ impl AggregationCircuit {
         }
     }
 
-    pub fn accumulator_indices() -> Vec<(usize, usize)> {
-        (0..4 * LIMBS).map(|idx| (0, idx)).collect()
-    }
-
-    pub fn num_instance() -> Vec<usize> {
-        vec![4 * LIMBS]
-    }
-
     pub fn instance(&self) -> Vec<Fr> {
         self.instances.clone()
     }
@@ -268,7 +263,7 @@ impl CircuitExt<Fr> for AggregationCircuit {
     }
 
     fn instances(&self) -> Vec<Vec<Fr>> {
-        vec![self.instances.clone()]
+        vec![self.instance()]
     }
 
     fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
@@ -309,67 +304,199 @@ impl Circuit<Fr> for AggregationCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), plonk::Error> {
-        config.range().load_lookup_table(&mut layouter)?;
-
-        // assume using simple floor planner
+        config.range().load_lookup_table(&mut layouter).expect("load range lookup table");
         let mut first_pass = halo2_base::SKIP_FIRST_PASS;
-        let mut assigned_instances = vec![];
+        let mut instances = vec![];
+        layouter
+            .assign_region(
+                || "",
+                |region| {
+                    if first_pass {
+                        first_pass = false;
+                        return Ok(());
+                    }
+                    #[cfg(feature = "display")]
+                    let witness_time = start_timer!(|| "Witness Collection");
+                    let ctx = Context::new(
+                        region,
+                        ContextParams {
+                            max_rows: config.gate().max_rows,
+                            num_context_ids: 1,
+                            fixed_columns: config.gate().constants.clone(),
+                        },
+                    );
 
-        layouter.assign_region(
-            || "",
-            |region| {
-                if first_pass {
-                    first_pass = false;
-                    return Ok(());
-                }
-                #[cfg(feature = "display")]
-                let witness_time = start_timer!(|| "Witness Collection");
-                let ctx = Context::new(
-                    region,
-                    ContextParams {
-                        max_rows: config.gate().max_rows,
-                        num_context_ids: 1,
-                        fixed_columns: config.gate().constants.clone(),
-                    },
-                );
+                    let ecc_chip = config.ecc_chip();
+                    let loader = Halo2Loader::new(ecc_chip, ctx);
+                    let (_, KzgAccumulator { lhs, rhs }) = aggregate::<Kzg<Bn256, Bdfg21>>(
+                        &self.svk,
+                        &loader,
+                        &self.snarks,
+                        self.as_proof(),
+                    );
 
-                let ecc_chip = config.ecc_chip();
-                let loader = Halo2Loader::new(ecc_chip, ctx);
-                let (_, KzgAccumulator { lhs, rhs }) = aggregate::<Kzg<Bn256, Bdfg21>>(
-                    &self.svk,
-                    &loader,
-                    &self.snarks,
-                    self.as_proof(),
-                );
+                    let lhs = lhs.assigned();
+                    let rhs = rhs.assigned();
 
-                let lhs = lhs.assigned();
-                let rhs = rhs.assigned();
-
-                config.base_field_config.finalize(&mut loader.ctx_mut());
-                #[cfg(feature = "display")]
-                println!("Total advice cells: {}", loader.ctx().total_advice);
-                #[cfg(feature = "display")]
-                println!("Advice columns used: {}", loader.ctx().advice_alloc[0].0 + 1);
-
-                assigned_instances = lhs
-                    .x
-                    .truncation
-                    .limbs
-                    .iter()
-                    .chain(lhs.y.truncation.limbs.iter())
-                    .chain(rhs.x.truncation.limbs.iter())
-                    .chain(rhs.y.truncation.limbs.iter())
-                    .map(|assigned| assigned.cell().clone())
-                    .collect_vec();
-                #[cfg(feature = "display")]
-                end_timer!(witness_time);
-                Ok(())
-            },
-        )?;
+                    instances.extend(
+                        lhs.x
+                            .truncation
+                            .limbs
+                            .iter()
+                            .chain(lhs.y.truncation.limbs.iter())
+                            .chain(rhs.x.truncation.limbs.iter())
+                            .chain(rhs.y.truncation.limbs.iter())
+                            .map(|assigned| assigned.cell())
+                            .cloned(),
+                    );
+                    let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
+                    #[cfg(feature = "display")]
+                    {
+                        loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
+                        end_timer!(witness_time);
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
 
         // Expose instances
-        // TODO: use less instances by following Scroll's strategy of keeping only last bit of y coordinate
-        for (i, cell) in assigned_instances.into_iter().enumerate() {
+        for (i, cell) in instances.into_iter().enumerate() {
+            layouter.constrain_instance(cell, config.instance, i);
+        }
+        Ok(())
+    }
+}
+
+/// This circuit takes a single SNARK, assumed to be an aggregation circuit of some kind,
+/// and passes through all of its instances except the old accumulators.
+///
+/// We assume the previous SNARK circuit only has one instance column.
+pub struct EvmVerifierAfterAggregationCircuit(pub AggregationCircuit);
+
+impl EvmVerifierAfterAggregationCircuit {
+    pub fn new(
+        params: &ParamsKZG<Bn256>,
+        snark: Snark,
+        transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
+        rng: &mut impl Rng,
+    ) -> Self {
+        Self(AggregationCircuit::new(params, vec![snark], transcript_write, rng))
+    }
+}
+
+impl CircuitExt<Fr> for EvmVerifierAfterAggregationCircuit {
+    type ExtraCircuitParams = usize;
+
+    fn extra_params(&self) -> usize {
+        assert_eq!(self.0.snarks[0].instances.len(), 1);
+        self.0.snarks[0].instances[0].len()
+    }
+
+    fn num_instance(num_instance: &usize) -> Vec<usize> {
+        vec![*num_instance]
+    }
+
+    fn instances(&self) -> Vec<Vec<Fr>> {
+        let instance = self
+            .0
+            .instances
+            .iter()
+            .cloned()
+            .chain(
+                self.0.snarks[0].instances[0][4 * LIMBS..]
+                    .iter()
+                    .map(|v| value_to_option(*v).unwrap_or(Fr::zero())),
+            )
+            .collect_vec();
+        vec![instance]
+    }
+
+    fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
+        Some((0..4 * LIMBS).map(|idx| (0, idx)).collect())
+    }
+
+    fn selectors(config: &Self::Config) -> Vec<Selector> {
+        config.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
+    }
+}
+
+impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
+    type Config = AggregationConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self(self.0.without_witnesses())
+    }
+
+    fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
+        AggregationCircuit::configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<Fr>,
+    ) -> Result<(), plonk::Error> {
+        config.range().load_lookup_table(&mut layouter).expect("load range lookup table");
+        let mut first_pass = halo2_base::SKIP_FIRST_PASS;
+        let mut instances = vec![];
+        layouter
+            .assign_region(
+                || "",
+                |region| {
+                    if first_pass {
+                        first_pass = false;
+                        return Ok(());
+                    }
+                    #[cfg(feature = "display")]
+                    let witness_time = start_timer!(|| { "Witness Collection | EVM verifier" });
+                    let ctx = Context::new(
+                        region,
+                        ContextParams {
+                            max_rows: config.gate().max_rows,
+                            num_context_ids: 1,
+                            fixed_columns: config.gate().constants.clone(),
+                        },
+                    );
+
+                    let ecc_chip = config.ecc_chip();
+                    let loader = Halo2Loader::new(ecc_chip, ctx);
+                    let (prev_instances, KzgAccumulator { lhs, rhs }) =
+                        aggregate::<Kzg<Bn256, Bdfg21>>(
+                            &self.0.svk,
+                            &loader,
+                            &self.0.snarks,
+                            self.0.as_proof(),
+                        );
+                    let lhs = lhs.assigned();
+                    let rhs = rhs.assigned();
+
+                    instances.extend(
+                        lhs.x
+                            .truncation
+                            .limbs
+                            .iter()
+                            .chain(lhs.y.truncation.limbs.iter())
+                            .chain(rhs.x.truncation.limbs.iter())
+                            .chain(rhs.y.truncation.limbs.iter())
+                            .chain(prev_instances[4 * LIMBS..].iter())
+                            .map(|assigned| assigned.cell())
+                            .cloned(),
+                    );
+
+                    let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
+                    #[cfg(feature = "display")]
+                    {
+                        loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
+                        end_timer!(witness_time);
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        // Expose instances
+        for (i, cell) in instances.into_iter().enumerate() {
             layouter.constrain_instance(cell, config.instance, i);
         }
         Ok(())

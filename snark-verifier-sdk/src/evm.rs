@@ -1,4 +1,6 @@
 use super::{CircuitExt, Plonk};
+#[cfg(feature = "display")]
+use ark_std::{end_timer, start_timer};
 use ethereum_types::Address;
 use halo2_base::halo2_proofs::{
     dev::MockProver,
@@ -53,6 +55,9 @@ where
     }
 
     let instances = instances.iter().map(|instances| instances.as_slice()).collect_vec();
+
+    #[cfg(feature = "display")]
+    let proof_time = start_timer!(|| "Create EVM proof");
     let proof = {
         let mut transcript = TranscriptWriterBuffer::<_, G1Affine, _>::init(Vec::new());
         create_proof::<KZGCommitmentScheme<Bn256>, P, _, _, EvmTranscript<_, _, _, _>, _>(
@@ -66,6 +71,8 @@ where
         .unwrap();
         transcript.finalize()
     };
+    #[cfg(feature = "display")]
+    end_timer!(proof_time);
 
     let accept = {
         let mut transcript = TranscriptReadBuffer::<_, G1Affine, _>::init(proof.as_slice());
