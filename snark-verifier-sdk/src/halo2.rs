@@ -75,7 +75,7 @@ pub fn gen_proof<'params, C, P, V>(
     circuit: C,
     instances: Vec<Vec<Fr>>,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8>
 where
@@ -151,7 +151,7 @@ pub fn gen_proof_gwc<C: Circuit<Fr>>(
     circuit: C,
     instances: Vec<Vec<Fr>>,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8> {
     gen_proof::<C, ProverGWC<_>, VerifierGWC<_>>(
@@ -168,7 +168,7 @@ pub fn gen_proof_shplonk<C: Circuit<Fr>>(
     circuit: C,
     instances: Vec<Vec<Fr>>,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8> {
     gen_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(
@@ -185,7 +185,7 @@ pub fn gen_snark<'params, ConcreteCircuit, P, V>(
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark
 where
@@ -243,7 +243,7 @@ pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark {
     gen_snark::<ConcreteCircuit, ProverGWC<_>, VerifierGWC<_>>(
@@ -260,7 +260,7 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark {
     gen_snark::<ConcreteCircuit, ProverSHPLONK<_>, VerifierSHPLONK<_>>(

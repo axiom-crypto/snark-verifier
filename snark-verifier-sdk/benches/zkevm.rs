@@ -72,7 +72,7 @@ fn bench(c: &mut Criterion) {
         circuit,
         &mut transcript,
         &mut rng,
-        Some((Path::new("data/zkevm_evm.in"), Path::new("data/zkevm_evm.pf"))),
+        None, // Some((Path::new("data/zkevm_evm.in"), Path::new("data/zkevm_evm.pf"))),
     );
     let snarks = [snark];
     // === finished zkevm evm circuit ===

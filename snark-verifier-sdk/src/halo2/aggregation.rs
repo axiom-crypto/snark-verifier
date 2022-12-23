@@ -191,7 +191,7 @@ impl AggregationCircuit {
         params: &ParamsKZG<Bn256>,
         snarks: impl IntoIterator<Item = Snark>,
         transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-        rng: &mut impl Rng,
+        rng: impl Rng + Send,
     ) -> Self {
         let svk = params.get_g()[0].into();
         let snarks = snarks.into_iter().collect_vec();
@@ -304,6 +304,8 @@ impl Circuit<Fr> for AggregationCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), plonk::Error> {
+        #[cfg(feature = "display")]
+        let witness_time = start_timer!(|| "synthesize | Aggregation Circuit");
         config.range().load_lookup_table(&mut layouter).expect("load range lookup table");
         let mut first_pass = halo2_base::SKIP_FIRST_PASS;
         let mut instances = vec![];
@@ -315,8 +317,6 @@ impl Circuit<Fr> for AggregationCircuit {
                         first_pass = false;
                         return Ok(());
                     }
-                    #[cfg(feature = "display")]
-                    let witness_time = start_timer!(|| "Witness Collection");
                     let ctx = Context::new(
                         region,
                         ContextParams {
@@ -351,10 +351,7 @@ impl Circuit<Fr> for AggregationCircuit {
                     );
                     let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
-                    {
-                        loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
-                        end_timer!(witness_time);
-                    }
+                    loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
                     Ok(())
                 },
             )
@@ -364,6 +361,8 @@ impl Circuit<Fr> for AggregationCircuit {
         for (i, cell) in instances.into_iter().enumerate() {
             layouter.constrain_instance(cell, config.instance, i);
         }
+        #[cfg(feature = "display")]
+        end_timer!(witness_time);
         Ok(())
     }
 }
@@ -379,7 +378,7 @@ impl EvmVerifierAfterAggregationCircuit {
         params: &ParamsKZG<Bn256>,
         snark: Snark,
         transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-        rng: &mut impl Rng,
+        rng: &mut (impl Rng + Send),
     ) -> Self {
         Self(AggregationCircuit::new(params, vec![snark], transcript_write, rng))
     }
@@ -438,6 +437,8 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), plonk::Error> {
+        #[cfg(feature = "display")]
+        let witness_time = start_timer!(|| { "synthesize | EVM verifier" });
         config.range().load_lookup_table(&mut layouter).expect("load range lookup table");
         let mut first_pass = halo2_base::SKIP_FIRST_PASS;
         let mut instances = vec![];
@@ -449,8 +450,6 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
                         first_pass = false;
                         return Ok(());
                     }
-                    #[cfg(feature = "display")]
-                    let witness_time = start_timer!(|| { "Witness Collection | EVM verifier" });
                     let ctx = Context::new(
                         region,
                         ContextParams {
@@ -487,10 +486,7 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
 
                     let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
-                    {
-                        loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
-                        end_timer!(witness_time);
-                    }
+                    loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
                     Ok(())
                 },
             )
@@ -499,6 +495,8 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
         for (i, cell) in instances.into_iter().enumerate() {
             layouter.constrain_instance(cell, config.instance, i);
         }
+        #[cfg(feature = "display")]
+        end_timer!(witness_time);
         Ok(())
     }
 }

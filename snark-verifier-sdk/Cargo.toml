@@ -45,7 +45,7 @@ tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
 default = ["loader_halo2", "loader_evm", "halo2-axiom", "halo2-base/jemallocator"]
-display = ["snark-verifier/display", "ark-std"]
+display = ["snark-verifier/display", "dep:ark-std"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 loader_halo2 = ["snark-verifier/loader_halo2"]
 parallel = ["snark-verifier/parallel"]

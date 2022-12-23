@@ -117,10 +117,10 @@ pub fn gen_pk<C: Circuit<Fr>>(
             #[cfg(feature = "display")]
             let read_time = start_timer!(|| format!("Reading pkey from {path:?}"));
 
-            // TODO: bench if BufReader is indeed faster than Read
+            // BufReader is indeed MUCH faster than Read
             let mut bufreader = BufReader::new(f);
-            let pk = ProvingKey::read::<_, C>(&mut bufreader, params)
-                .expect("Reading pkey should not fail");
+            let pk =
+                ProvingKey::read::<_, C>(&mut bufreader).expect("Reading pkey should not fail");
 
             #[cfg(feature = "display")]
             end_timer!(read_time);

@@ -34,10 +34,10 @@ incremental = false
 inherits = "release"
 debug = true
 
-# patch for now because PSE/halo2 has not yet updated halo2curves version, unnecessary if halo2_proofs is using latest halo2curves with Fq12 public
+# patch until PR https://github.com/privacy-scaling-explorations/halo2curves/pull/10 is merged
 [patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
-halo2curves = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/faster-witness-generation" }
+halo2curves = { git = "https://github.com/jonathanpwang/halo2curves.git", branch = "feat/serde-field" }
 
-# patch just because we cannot patch the same repo with different tag: serialization is already in latest PSE/halo2 but not in v2022_10_22
+# patch until PR https://github.com/privacy-scaling-explorations/halo2/pull/111 is merged
 [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
-halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/add-serialization" }
+halo2_proofs = { git = "https://github.com/axiom-crypto/halo2.git", branch = "feat/serde-raw" }

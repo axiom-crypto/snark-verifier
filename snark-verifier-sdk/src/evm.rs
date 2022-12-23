@@ -37,7 +37,7 @@ pub fn gen_evm_proof<'params, C, P, V>(
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
 ) -> Vec<u8>
 where
     C: Circuit<Fr>,
@@ -97,7 +97,7 @@ pub fn gen_evm_proof_gwc<'params, C: Circuit<Fr>>(
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
 ) -> Vec<u8> {
     gen_evm_proof::<C, ProverGWC<_>, VerifierGWC<_>>(params, pk, circuit, instances, rng)
 }
@@ -107,7 +107,7 @@ pub fn gen_evm_proof_shplonk<'params, C: Circuit<Fr>>(
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + Send),
 ) -> Vec<u8> {
     gen_evm_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(params, pk, circuit, instances, rng)
 }

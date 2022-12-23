@@ -52,7 +52,7 @@ where
     TW: TranscriptWriterBuffer<Vec<u8>, S::Curve, EC>,
     TR: TranscriptReadBuffer<Cursor<Vec<u8>>, S::Curve, EC>,
     EC: EncodedChallenge<S::Curve>,
-    R: RngCore,
+    R: RngCore + Send,
 {
     for (circuit, instances) in circuits.iter().zip(instances.iter()) {
         MockProver::run(
