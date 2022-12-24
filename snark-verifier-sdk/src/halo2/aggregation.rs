@@ -371,6 +371,7 @@ impl Circuit<Fr> for AggregationCircuit {
 /// and passes through all of its instances except the old accumulators.
 ///
 /// We assume the previous SNARK circuit only has one instance column.
+#[derive(Clone)]
 pub struct EvmVerifierAfterAggregationCircuit(pub AggregationCircuit);
 
 impl EvmVerifierAfterAggregationCircuit {
@@ -405,7 +406,7 @@ impl CircuitExt<Fr> for EvmVerifierAfterAggregationCircuit {
             .chain(
                 self.0.snarks[0].instances[0][4 * LIMBS..]
                     .iter()
-                    .map(|v| value_to_option(*v).unwrap_or(Fr::zero())),
+                    .map(|v| value_to_option(*v).unwrap()),
             )
             .collect_vec();
         vec![instance]
