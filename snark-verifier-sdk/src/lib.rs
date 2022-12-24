@@ -191,9 +191,18 @@ pub fn write_instances(instances: &[&[Fr]], path: impl AsRef<Path>) {
 mod zkevm {
     use super::CircuitExt;
     use eth_types::Field;
-    use zkevm_circuits::evm_circuit::EvmCircuit;
+    use zkevm_circuits::{evm_circuit::EvmCircuit, state_circuit::StateCircuit};
 
     impl<F: Field> CircuitExt<F> for EvmCircuit<F> {
+        fn instances(&self) -> Vec<Vec<F>> {
+            vec![]
+        }
+        fn num_instance() -> Vec<usize> {
+            vec![]
+        }
+    }
+
+    impl<F: Field> CircuitExt<F> for StateCircuit<F> {
         fn instances(&self) -> Vec<Vec<F>> {
             vec![]
         }

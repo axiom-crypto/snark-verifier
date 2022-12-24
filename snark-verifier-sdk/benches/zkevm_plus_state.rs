@@ -30,9 +30,13 @@ pub mod zkevm {
     use bus_mapping::{circuit_input_builder::CircuitsParams, mock::BlockData};
     use eth_types::geth_types::GethData;
     use mock::TestContext;
-    use zkevm_circuits::evm_circuit::{witness::block_convert, EvmCircuit};
+    use zkevm_circuits::{
+        evm_circuit::{witness::block_convert, EvmCircuit},
+        state_circuit::StateCircuit,
+        witness::RwMap,
+    };
 
-    pub fn test_circuit() -> EvmCircuit<Fr> {
+    pub fn test_evm_circuit() -> EvmCircuit<Fr> {
         let empty_data: GethData =
             TestContext::<0, 0>::new(None, |_| {}, |_, _| {}, |b, _| b).unwrap().into();
 
@@ -47,6 +51,10 @@ pub mod zkevm {
         let block = block_convert(&builder.block, &builder.code_db).unwrap();
 
         EvmCircuit::<Fr>::new(block)
+    }
+
+    pub fn test_state_circuit() -> StateCircuit<Fr> {
+        StateCircuit::new(RwMap::default(), 1 << 16)
     }
 }
 
@@ -63,22 +71,36 @@ fn bench(c: &mut Criterion) {
         })
         .parse()
         .unwrap();
-    let circuit = zkevm::test_circuit();
+    let evm_circuit = zkevm::test_evm_circuit();
+    let state_circuit = zkevm::test_state_circuit();
     let params_app = gen_srs(k);
-    let pk = gen_pk(&params_app, &circuit, Some(Path::new("data/zkevm_evm.pkey")));
-    let snark = gen_snark_gwc(
-        &params_app,
-        &pk,
-        circuit,
-        &mut transcript,
-        &mut rng,
-        Some(Path::new("data/zkevm_evm.snark")),
-    );
-    let snarks = [snark];
+    let evm_snark = {
+        let pk = gen_pk(&params_app, &evm_circuit, Some(Path::new("data/zkevm_evm.pkey")));
+        gen_snark_gwc(
+            &params_app,
+            &pk,
+            evm_circuit,
+            &mut transcript,
+            &mut rng,
+            Some(Path::new("data/zkevm_evm.snark")),
+        )
+    };
+    let state_snark = {
+        let pk = gen_pk(&params_app, &state_circuit, Some(Path::new("data/zkevm_state.pkey")));
+        gen_snark_shplonk(
+            &params_app,
+            &pk,
+            state_circuit,
+            &mut transcript,
+            &mut rng,
+            Some(Path::new("data/zkevm_state.snark")),
+        )
+    };
+    let snarks = [evm_snark, state_snark];
     // === finished zkevm evm circuit ===
 
     // === now to do aggregation ===
-    set_var("VERIFY_CONFIG", "./configs/bench_zkevm.config");
+    set_var("VERIFY_CONFIG", "./configs/bench_zkevm_plus_state.config");
     let k = load_verify_circuit_degree();
     let params = gen_srs(k);
 
@@ -91,7 +113,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("shplonk-proof");
     group.sample_size(10);
     group.bench_with_input(
-        BenchmarkId::new("zkevm-evm-agg", k),
+        BenchmarkId::new("zkevm-evm-state-agg", k),
         &(&params, &pk, &agg_circuit),
         |b, &(params, pk, agg_circuit)| {
             b.iter(|| {
@@ -113,7 +135,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("gwc-proof");
     group.sample_size(10);
     group.bench_with_input(
-        BenchmarkId::new("zkevm-evm-agg", k),
+        BenchmarkId::new("zkevm-evm-state-agg", k),
         &(&params, &pk, &agg_circuit),
         |b, &(params, pk, agg_circuit)| {
             b.iter(|| {
