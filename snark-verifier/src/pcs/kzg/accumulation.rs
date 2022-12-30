@@ -117,22 +117,17 @@ where
         assert!(!instances.is_empty());
 
         for accumulator in instances {
-            transcript.common_ec_point(&accumulator.lhs)?;
-            transcript.common_ec_point(&accumulator.rhs)?;
+            transcript.common_ec_point(&accumulator.lhs).unwrap();
+            transcript.common_ec_point(&accumulator.rhs).unwrap();
         }
 
         let blind = vk
             .zk()
-            .then(|| Ok((transcript.read_ec_point()?, transcript.read_ec_point()?)))
-            .transpose()?;
+            .then(|| (transcript.read_ec_point().unwrap(), transcript.read_ec_point().unwrap()));
 
         let r = transcript.squeeze_challenge();
 
-        Ok(Self {
-            blind,
-            r,
-            _marker: PhantomData,
-        })
+        Ok(Self { blind, r, _marker: PhantomData })
     }
 }
 
