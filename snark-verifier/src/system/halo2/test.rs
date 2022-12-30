@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(clippy::all)]
 use crate::halo2_proofs::{
     dev::MockProver,
     plonk::{create_proof, verify_proof, Circuit, ProvingKey},

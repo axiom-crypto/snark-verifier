@@ -11,8 +11,7 @@ use crate::halo2_proofs::{
         },
     },
     transcript::{
-        Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge, TranscriptReadBuffer,
-        TranscriptWriterBuffer,
+        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
     },
 };
 use crate::{

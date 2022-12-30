@@ -10,10 +10,14 @@ pub mod util;
 pub mod verifier;
 
 pub(crate) use halo2_base::halo2_proofs;
-pub(crate) use halo2_base::poseidon;
 pub(crate) use halo2_proofs::halo2curves as halo2_curves;
-use serde::Deserialize;
-use serde::Serialize;
+#[cfg(feature = "halo2-pse")]
+pub(crate) use poseidon;
+#[cfg(feature = "halo2-axiom")]
+pub(crate) use poseidon_axiom as poseidon;
+
+pub use poseidon::Spec as PoseidonSpec;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub enum Error {

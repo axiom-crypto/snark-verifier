@@ -349,9 +349,9 @@ impl Circuit<Fr> for AggregationCircuit {
                             .map(|assigned| assigned.cell())
                             .cloned(),
                     );
-                    let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
+                    config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
-                    loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
+                    loader.ctx_mut().print_stats(&["Range"]);
                     Ok(())
                 },
             )
@@ -485,9 +485,9 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
                             .cloned(),
                     );
 
-                    let _num_lookup_advice = config.range().finalize(&mut loader.ctx_mut());
+                    config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
-                    loader.ctx_mut().print_stats(&["Range"], _num_lookup_advice);
+                    loader.ctx_mut().print_stats(&["Range"]);
                     Ok(())
                 },
             )
