@@ -121,8 +121,8 @@ where
 pub struct AggregationConfigParams {
     pub strategy: halo2_ecc::fields::fp::FpStrategy,
     pub degree: u32,
-    pub num_advice: usize,
-    pub num_lookup_advice: usize,
+    pub num_advice: Vec<usize>,
+    pub num_lookup_advice: Vec<usize>,
     pub num_fixed: usize,
     pub lookup_bits: usize,
     pub limb_bits: usize,
@@ -145,8 +145,8 @@ impl AggregationConfig {
         let base_field_config = halo2_ecc::fields::fp::FpConfig::configure(
             meta,
             params.strategy,
-            &[params.num_advice],
-            &[params.num_lookup_advice],
+            &params.num_advice,
+            &params.num_lookup_advice,
             params.num_fixed,
             params.lookup_bits,
             BITS,
