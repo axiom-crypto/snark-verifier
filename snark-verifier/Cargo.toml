@@ -15,7 +15,7 @@ rustc-hash = "1.1.0"
 serde = { version = "1.0", features = ["derive"] }
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
-halo2-base = { git = "ssh://git@github.com/axiom-crypto/axiom-core-working.git", branch = "feat/use-keccak-with-rlc", default-features = false }
+halo2-base = { git = "ssh://git@github.com/axiom-crypto/axiom-core-working.git", default-features = false }
 # This poseidon is identical to PSE (for now) but uses axiom's halo2curves; otherwise would require patching
 poseidon-axiom = { git = "https://github.com/axiom-crypto/halo2.git", branch = "axiom/faster-witness-generation", package = "poseidon", optional = true }
 poseidon= { git = "https://github.com/privacy-scaling-explorations/poseidon", optional = true }
@@ -31,7 +31,7 @@ bytes = { version = "1.2", optional = true }
 rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
 
 # loader_halo2
-halo2-ecc = { git = "ssh://git@github.com/axiom-crypto/axiom-core-working.git", branch = "feat/use-keccak-with-rlc", default-features = false, optional = true }
+halo2-ecc = { git = "ssh://git@github.com/axiom-crypto/axiom-core-working.git", default-features = false, optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
