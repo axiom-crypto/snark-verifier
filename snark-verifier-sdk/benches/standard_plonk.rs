@@ -88,9 +88,7 @@ mod application {
     }
 
     impl CircuitExt<Fr> for StandardPlonk {
-        fn extra_params(&self) -> Self::ExtraCircuitParams {}
-
-        fn num_instance(_: &Self::ExtraCircuitParams) -> Vec<usize> {
+        fn num_instance(&self) -> Vec<usize> {
             vec![1]
         }
 

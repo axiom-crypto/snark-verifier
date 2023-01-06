@@ -256,8 +256,7 @@ impl AggregationCircuit {
 }
 
 impl CircuitExt<Fr> for AggregationCircuit {
-    fn extra_params(&self) -> Self::ExtraCircuitParams {}
-    fn num_instance(_: &()) -> Vec<usize> {
+    fn num_instance(&self) -> Vec<usize> {
         // [..lhs, ..rhs]
         vec![4 * LIMBS]
     }
@@ -367,44 +366,49 @@ impl Circuit<Fr> for AggregationCircuit {
     }
 }
 
-/// This circuit takes a single SNARK, assumed to be an aggregation circuit of some kind,
-/// and passes through all of its instances except the old accumulators.
+/// This circuit takes a single SNARK and passes through all of its instances except the old accumulators.
+/// The `has_prev_accumulator` boolean tells the circuit whether the SNARK to be verified was
+/// an aggregation circuit (and hence has previous accumulators) or not.
 ///
 /// We assume the previous SNARK circuit only has one instance column.
 #[derive(Clone)]
-pub struct EvmVerifierAfterAggregationCircuit(pub AggregationCircuit);
+pub struct EvmSingleVerifierCircuit {
+    pub aggregation: AggregationCircuit,
+    pub has_prev_accumulator: bool,
+}
 
-impl EvmVerifierAfterAggregationCircuit {
+impl EvmSingleVerifierCircuit {
     pub fn new(
         params: &ParamsKZG<Bn256>,
         snark: Snark,
+        has_prev_accumulator: bool,
         transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
         rng: &mut (impl Rng + Send),
     ) -> Self {
-        Self(AggregationCircuit::new(params, vec![snark], transcript_write, rng))
+        Self {
+            aggregation: AggregationCircuit::new(params, vec![snark], transcript_write, rng),
+            has_prev_accumulator,
+        }
     }
 }
 
-impl CircuitExt<Fr> for EvmVerifierAfterAggregationCircuit {
-    type ExtraCircuitParams = usize;
-
-    fn extra_params(&self) -> usize {
-        assert_eq!(self.0.snarks[0].instances.len(), 1);
-        self.0.snarks[0].instances[0].len()
-    }
-
-    fn num_instance(num_instance: &usize) -> Vec<usize> {
-        vec![*num_instance]
+impl CircuitExt<Fr> for EvmSingleVerifierCircuit {
+    fn num_instance(&self) -> Vec<usize> {
+        vec![
+            self.aggregation.snarks[0].instances[0].len()
+                + if !self.has_prev_accumulator { 4 * LIMBS } else { 0 },
+        ]
     }
 
     fn instances(&self) -> Vec<Vec<Fr>> {
         let instance = self
-            .0
+            .aggregation
             .instances
             .iter()
             .cloned()
             .chain(
-                self.0.snarks[0].instances[0][4 * LIMBS..]
+                self.aggregation.snarks[0].instances[0]
+                    [4 * LIMBS * usize::from(self.has_prev_accumulator)..]
                     .iter()
                     .map(|v| value_to_option(*v).unwrap()),
             )
@@ -421,12 +425,15 @@ impl CircuitExt<Fr> for EvmVerifierAfterAggregationCircuit {
     }
 }
 
-impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
+impl Circuit<Fr> for EvmSingleVerifierCircuit {
     type Config = AggregationConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self(self.0.without_witnesses())
+        Self {
+            aggregation: self.aggregation.without_witnesses(),
+            has_prev_accumulator: self.has_prev_accumulator,
+        }
     }
 
     fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
@@ -464,10 +471,10 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
                     let loader = Halo2Loader::new(ecc_chip, ctx);
                     let (prev_instances, KzgAccumulator { lhs, rhs }) =
                         aggregate::<Kzg<Bn256, Bdfg21>>(
-                            &self.0.svk,
+                            &self.aggregation.svk,
                             &loader,
-                            &self.0.snarks,
-                            self.0.as_proof(),
+                            &self.aggregation.snarks,
+                            self.aggregation.as_proof(),
                         );
                     let lhs = lhs.assigned();
                     let rhs = rhs.assigned();
@@ -480,7 +487,11 @@ impl Circuit<Fr> for EvmVerifierAfterAggregationCircuit {
                             .chain(lhs.y.truncation.limbs.iter())
                             .chain(rhs.x.truncation.limbs.iter())
                             .chain(rhs.y.truncation.limbs.iter())
-                            .chain(prev_instances[4 * LIMBS..].iter())
+                            .chain(
+                                prev_instances
+                                    [4 * LIMBS * usize::from(self.has_prev_accumulator)..]
+                                    .iter(),
+                            )
                             .map(|assigned| assigned.cell())
                             .cloned(),
                     );

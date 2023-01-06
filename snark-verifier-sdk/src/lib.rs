@@ -85,14 +85,9 @@ impl SnarkWitness {
 }
 
 pub trait CircuitExt<F: Field>: Circuit<F> {
-    /// Due to limitations of Rust generics, we provide a helper type to hold extra parameters that may determine a circuit
-    type ExtraCircuitParams = ();
-
-    /// The extra parameters should be derivable from any circuit instance
-    fn extra_params(&self) -> Self::ExtraCircuitParams;
-
-    /// Return the number of instances of the circuit. This may depend on extra circuit parameters but NOT on private witnesses.
-    fn num_instance(params: &Self::ExtraCircuitParams) -> Vec<usize>;
+    /// Return the number of instances of the circuit.
+    /// This may depend on extra circuit parameters but NOT on private witnesses.
+    fn num_instance(&self) -> Vec<usize>;
 
     fn instances(&self) -> Vec<Vec<F>>;
 

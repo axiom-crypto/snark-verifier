@@ -115,7 +115,7 @@ pub fn gen_evm_proof_shplonk<'params, C: Circuit<Fr>>(
 pub fn gen_evm_verifier<C, PCS>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
-    extra_circuit_params: &C::ExtraCircuitParams,
+    num_instance: Vec<usize>,
     path: Option<&Path>,
 ) -> Vec<u8>
 where
@@ -136,7 +136,7 @@ where
         params,
         vk,
         Config::kzg()
-            .with_num_instance(C::num_instance(extra_circuit_params))
+            .with_num_instance(num_instance.clone())
             .with_accumulator_indices(C::accumulator_indices()),
     );
 
@@ -144,7 +144,7 @@ where
     let protocol = protocol.loaded(&loader);
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
-    let instances = transcript.load_instances(C::num_instance(extra_circuit_params));
+    let instances = transcript.load_instances(num_instance);
     let proof = Plonk::<PCS>::read_proof(&svk, &protocol, &instances, &mut transcript);
     Plonk::<PCS>::verify(&svk, &dk, &protocol, &instances, &proof);
 
@@ -160,19 +160,19 @@ where
 pub fn gen_evm_verifier_gwc<C: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
-    extra_circuit_params: &C::ExtraCircuitParams,
+    num_instance: Vec<usize>,
     path: Option<&Path>,
 ) -> Vec<u8> {
-    gen_evm_verifier::<C, Kzg<Bn256, Gwc19>>(params, vk, extra_circuit_params, path)
+    gen_evm_verifier::<C, Kzg<Bn256, Gwc19>>(params, vk, num_instance, path)
 }
 
 pub fn gen_evm_verifier_shplonk<C: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
-    extra_circuit_params: &C::ExtraCircuitParams,
+    num_instance: Vec<usize>,
     path: Option<&Path>,
 ) -> Vec<u8> {
-    gen_evm_verifier::<C, Kzg<Bn256, Bdfg21>>(params, vk, extra_circuit_params, path)
+    gen_evm_verifier::<C, Kzg<Bn256, Bdfg21>>(params, vk, num_instance, path)
 }
 
 pub fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {

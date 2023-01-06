@@ -38,7 +38,6 @@ use snark_verifier::{
 };
 use std::{
     fs::{self, File},
-    iter,
     marker::PhantomData,
     path::Path,
 };
@@ -208,7 +207,7 @@ where
         params,
         pk.get_vk(),
         Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance(&circuit.extra_params()))
+            .with_num_instance(circuit.num_instance())
             .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
     );
 
@@ -280,7 +279,7 @@ pub fn read_snark(path: impl AsRef<Path>) -> Result<Snark, bincode::Error> {
 pub fn gen_dummy_snark<ConcreteCircuit, MOS>(
     params: &ParamsKZG<Bn256>,
     vk: Option<&VerifyingKey<G1Affine>>,
-    extra_params: &ConcreteCircuit::ExtraCircuitParams,
+    num_instance: Vec<usize>,
 ) -> Snark
 where
     ConcreteCircuit: CircuitExt<Fr>,
@@ -328,13 +327,10 @@ where
         params,
         vk.or(dummy_vk.as_ref()).unwrap(),
         Config::kzg()
-            .with_num_instance(ConcreteCircuit::num_instance(extra_params))
+            .with_num_instance(num_instance.clone())
             .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
     );
-    let instances = ConcreteCircuit::num_instance(extra_params)
-        .into_iter()
-        .map(|n| iter::repeat(Fr::default()).take(n).collect())
-        .collect();
+    let instances = num_instance.into_iter().map(|n| vec![Fr::default(); n]).collect();
     let proof = {
         let mut transcript = PoseidonTranscript::<NativeLoader, _>::new(Vec::new());
         for _ in 0..protocol
