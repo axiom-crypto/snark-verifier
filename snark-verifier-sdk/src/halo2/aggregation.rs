@@ -1,3 +1,4 @@
+#![allow(clippy::clone_on_copy)]
 use crate::{Plonk, BITS, LIMBS};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
@@ -366,52 +367,58 @@ impl Circuit<Fr> for AggregationCircuit {
     }
 }
 
-/// This circuit takes a single SNARK and passes through all of its instances except the old accumulators.
-/// The `has_prev_accumulator` boolean tells the circuit whether the SNARK to be verified was
-/// an aggregation circuit (and hence has previous accumulators) or not.
+/// This circuit takes multiple SNARKs and passes through all of their instances except the old accumulators.
 ///
-/// We assume the previous SNARK circuit only has one instance column.
+/// * If `has_prev_accumulator = true`, we assume all SNARKs are of aggregation circuits with old accumulators
+/// only in the first instance column.
+/// * Otherwise if `has_prev_accumulator = false`, then all previous instances are passed through.
 #[derive(Clone)]
-pub struct EvmSingleVerifierCircuit {
+pub struct PublicAggregationCircuit {
     pub aggregation: AggregationCircuit,
     pub has_prev_accumulator: bool,
 }
 
-impl EvmSingleVerifierCircuit {
+impl PublicAggregationCircuit {
     pub fn new(
         params: &ParamsKZG<Bn256>,
-        snark: Snark,
+        snarks: Vec<Snark>,
         has_prev_accumulator: bool,
         transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
         rng: &mut (impl Rng + Send),
     ) -> Self {
         Self {
-            aggregation: AggregationCircuit::new(params, vec![snark], transcript_write, rng),
+            aggregation: AggregationCircuit::new(params, snarks, transcript_write, rng),
             has_prev_accumulator,
         }
     }
 }
 
-impl CircuitExt<Fr> for EvmSingleVerifierCircuit {
+impl CircuitExt<Fr> for PublicAggregationCircuit {
     fn num_instance(&self) -> Vec<usize> {
-        vec![
-            self.aggregation.snarks[0].instances[0].len()
-                + if !self.has_prev_accumulator { 4 * LIMBS } else { 0 },
-        ]
+        let prev_num = self
+            .aggregation
+            .snarks
+            .iter()
+            .map(|snark| snark.instances.iter().map(|instance| instance.len()).sum::<usize>())
+            .sum::<usize>()
+            - self.aggregation.snarks.len() * 4 * LIMBS * usize::from(self.has_prev_accumulator);
+        vec![4 * LIMBS + prev_num]
     }
 
     fn instances(&self) -> Vec<Vec<Fr>> {
+        let start_idx = 4 * LIMBS * usize::from(self.has_prev_accumulator);
         let instance = self
             .aggregation
             .instances
             .iter()
             .cloned()
-            .chain(
-                self.aggregation.snarks[0].instances[0]
-                    [4 * LIMBS * usize::from(self.has_prev_accumulator)..]
-                    .iter()
-                    .map(|v| value_to_option(*v).unwrap()),
-            )
+            .chain(self.aggregation.snarks.iter().flat_map(|snark| {
+                snark.instances.iter().enumerate().flat_map(|(i, instance)| {
+                    instance[usize::from(i == 0) * start_idx..]
+                        .iter()
+                        .map(|v| value_to_option(*v).unwrap())
+                })
+            }))
             .collect_vec();
         vec![instance]
     }
@@ -425,7 +432,7 @@ impl CircuitExt<Fr> for EvmSingleVerifierCircuit {
     }
 }
 
-impl Circuit<Fr> for EvmSingleVerifierCircuit {
+impl Circuit<Fr> for PublicAggregationCircuit {
     type Config = AggregationConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -479,6 +486,7 @@ impl Circuit<Fr> for EvmSingleVerifierCircuit {
                     let lhs = lhs.assigned();
                     let rhs = rhs.assigned();
 
+                    // accumulator
                     instances.extend(
                         lhs.x
                             .truncation
@@ -487,14 +495,22 @@ impl Circuit<Fr> for EvmSingleVerifierCircuit {
                             .chain(lhs.y.truncation.limbs.iter())
                             .chain(rhs.x.truncation.limbs.iter())
                             .chain(rhs.y.truncation.limbs.iter())
-                            .chain(
-                                prev_instances
-                                    [4 * LIMBS * usize::from(self.has_prev_accumulator)..]
-                                    .iter(),
-                            )
-                            .map(|assigned| assigned.cell())
-                            .cloned(),
+                            .map(|a| a.cell().clone()),
                     );
+                    // prev instances except accumulators
+                    let mut idx = 0;
+                    let start_idx = 4 * LIMBS * usize::from(self.has_prev_accumulator);
+                    for snark in self.aggregation.snarks.iter() {
+                        for (i, instance) in snark.instances.iter().enumerate() {
+                            let start_idx = usize::from(i == 0) * start_idx;
+                            instances.extend(
+                                prev_instances[idx + start_idx..idx + instance.len()]
+                                    .iter()
+                                    .map(|a| a.cell().clone()),
+                            );
+                            idx += instance.len();
+                        }
+                    }
 
                     config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
