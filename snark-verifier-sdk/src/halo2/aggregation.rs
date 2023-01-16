@@ -346,8 +346,7 @@ impl Circuit<Fr> for AggregationCircuit {
                             .chain(lhs.y.truncation.limbs.iter())
                             .chain(rhs.x.truncation.limbs.iter())
                             .chain(rhs.y.truncation.limbs.iter())
-                            .map(|assigned| assigned.cell())
-                            .cloned(),
+                            .map(|assigned| assigned.cell().clone()),
                     );
                     config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]

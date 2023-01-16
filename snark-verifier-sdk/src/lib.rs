@@ -10,6 +10,7 @@ use halo2_proofs::{
     },
     plonk::{keygen_pk, keygen_vk, Circuit, ProvingKey, Selector},
     poly::kzg::commitment::ParamsKZG,
+    SerdeFormat,
 };
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -112,7 +113,8 @@ pub fn read_pk<C: Circuit<Fr>>(path: &Path) -> io::Result<ProvingKey<G1Affine>> 
     let initial_buffer_size = f.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
     let mut bufreader = Vec::with_capacity(initial_buffer_size);
     f.read_to_end(&mut bufreader)?;
-    let pk = ProvingKey::read::<_, C>(&mut bufreader.as_slice())?;
+    let pk = ProvingKey::read::<_, C>(&mut bufreader.as_slice(), SerdeFormat::RawBytesUnchecked)
+        .unwrap();
 
     #[cfg(feature = "display")]
     end_timer!(read_time);
@@ -146,7 +148,7 @@ pub fn gen_pk<C: Circuit<Fr>>(
 
         path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
         let mut f = BufWriter::new(File::create(path).unwrap());
-        pk.write(&mut f).unwrap();
+        pk.write(&mut f, SerdeFormat::RawBytesUnchecked).unwrap();
 
         #[cfg(feature = "display")]
         end_timer!(write_time);
