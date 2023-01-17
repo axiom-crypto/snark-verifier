@@ -5,11 +5,15 @@ use ark_std::{end_timer, start_timer};
 use halo2_base::{
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
-        halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
+        halo2curves::{
+            bn256::{Bn256, Fq, Fr, G1Affine},
+            CurveAffine,
+        },
         plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
         poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
     },
-    utils::value_to_option,
+    utils::{value_to_option, ScalarField},
+    AssignedValue,
 };
 use halo2_base::{Context, ContextParams};
 use itertools::Itertools;
@@ -47,6 +51,23 @@ pub fn load_verify_circuit_degree() -> u32 {
     )
     .unwrap();
     params.degree
+}
+
+pub fn flatten_accumulator<'b, 'a: 'b>(
+    accumulator: KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
+) -> Vec<AssignedValue<'b, Fr>> {
+    let KzgAccumulator { lhs, rhs } = accumulator;
+    let lhs = lhs.into_assigned();
+    let rhs = rhs.into_assigned();
+
+    lhs.x
+        .truncation
+        .limbs
+        .into_iter()
+        .chain(lhs.y.truncation.limbs.into_iter())
+        .chain(rhs.x.truncation.limbs.into_iter())
+        .chain(rhs.y.truncation.limbs.into_iter())
+        .collect()
 }
 
 #[allow(clippy::type_complexity)]
@@ -328,26 +349,17 @@ impl Circuit<Fr> for AggregationCircuit {
 
                     let ecc_chip = config.ecc_chip();
                     let loader = Halo2Loader::new(ecc_chip, ctx);
-                    let (_, KzgAccumulator { lhs, rhs }) = aggregate::<Kzg<Bn256, Bdfg21>>(
+                    let (_, acc) = aggregate::<Kzg<Bn256, Bdfg21>>(
                         &self.svk,
                         &loader,
                         &self.snarks,
                         self.as_proof(),
                     );
 
-                    let lhs = lhs.assigned();
-                    let rhs = rhs.assigned();
-
                     instances.extend(
-                        lhs.x
-                            .truncation
-                            .limbs
-                            .iter()
-                            .chain(lhs.y.truncation.limbs.iter())
-                            .chain(rhs.x.truncation.limbs.iter())
-                            .chain(rhs.y.truncation.limbs.iter())
-                            .map(|assigned| assigned.cell().clone()),
+                        flatten_accumulator(acc).iter().map(|assigned| assigned.cell().clone()),
                     );
+
                     config.range().finalize(&mut loader.ctx_mut());
                     #[cfg(feature = "display")]
                     loader.ctx_mut().print_stats(&["Range"]);
@@ -475,27 +487,15 @@ impl Circuit<Fr> for PublicAggregationCircuit {
 
                     let ecc_chip = config.ecc_chip();
                     let loader = Halo2Loader::new(ecc_chip, ctx);
-                    let (prev_instances, KzgAccumulator { lhs, rhs }) =
-                        aggregate::<Kzg<Bn256, Bdfg21>>(
-                            &self.aggregation.svk,
-                            &loader,
-                            &self.aggregation.snarks,
-                            self.aggregation.as_proof(),
-                        );
-                    let lhs = lhs.assigned();
-                    let rhs = rhs.assigned();
+                    let (prev_instances, acc) = aggregate::<Kzg<Bn256, Bdfg21>>(
+                        &self.aggregation.svk,
+                        &loader,
+                        &self.aggregation.snarks,
+                        self.aggregation.as_proof(),
+                    );
 
                     // accumulator
-                    instances.extend(
-                        lhs.x
-                            .truncation
-                            .limbs
-                            .iter()
-                            .chain(lhs.y.truncation.limbs.iter())
-                            .chain(rhs.x.truncation.limbs.iter())
-                            .chain(rhs.y.truncation.limbs.iter())
-                            .map(|a| a.cell().clone()),
-                    );
+                    instances.extend(flatten_accumulator(acc).iter().map(|a| a.cell().clone()));
                     // prev instances except accumulators
                     let mut idx = 0;
                     let start_idx = 4 * LIMBS * usize::from(self.has_prev_accumulator);
