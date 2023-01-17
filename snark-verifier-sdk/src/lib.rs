@@ -18,7 +18,7 @@ pub use snark_verifier::loader::native::NativeLoader;
 use snark_verifier::{pcs::kzg::LimbsEncoding, verifier, Protocol};
 use std::{
     fs::{self, File},
-    io::{self, BufReader, BufWriter, Read},
+    io::{self, BufReader, BufWriter},
     path::Path,
 };
 

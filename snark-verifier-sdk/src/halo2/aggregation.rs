@@ -5,14 +5,11 @@ use ark_std::{end_timer, start_timer};
 use halo2_base::{
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
-        halo2curves::{
-            bn256::{Bn256, Fq, Fr, G1Affine},
-            CurveAffine,
-        },
+        halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
         plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
         poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
     },
-    utils::{value_to_option, ScalarField},
+    utils::value_to_option,
     AssignedValue,
 };
 use halo2_base::{Context, ContextParams};
@@ -212,7 +209,6 @@ impl AggregationCircuit {
     pub fn new(
         params: &ParamsKZG<Bn256>,
         snarks: impl IntoIterator<Item = Snark>,
-        transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
         rng: impl Rng + Send,
     ) -> Self {
         let svk = params.get_g()[0].into();
@@ -237,16 +233,19 @@ impl AggregationCircuit {
             .collect_vec();
 
         let (accumulator, as_proof) = {
-            transcript_write.clear();
+            let mut transcript_write = PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(
+                vec![],
+                POSEIDON_SPEC.clone(),
+            );
             // We always use SHPLONK for accumulation scheme when aggregating proofs
             let accumulator = KzgAs::<Kzg<Bn256, Bdfg21>>::create_proof(
                 &Default::default(),
                 &accumulators,
-                transcript_write,
+                &mut transcript_write,
                 rng,
             )
             .unwrap();
-            (accumulator, transcript_write.stream_mut().split_off(0))
+            (accumulator, transcript_write.finalize())
         };
 
         let KzgAccumulator { lhs, rhs } = accumulator;
@@ -394,13 +393,9 @@ impl PublicAggregationCircuit {
         params: &ParamsKZG<Bn256>,
         snarks: Vec<Snark>,
         has_prev_accumulator: bool,
-        transcript_write: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
         rng: &mut (impl Rng + Send),
     ) -> Self {
-        Self {
-            aggregation: AggregationCircuit::new(params, snarks, transcript_write, rng),
-            has_prev_accumulator,
-        }
+        Self { aggregation: AggregationCircuit::new(params, snarks, rng), has_prev_accumulator }
     }
 }
 

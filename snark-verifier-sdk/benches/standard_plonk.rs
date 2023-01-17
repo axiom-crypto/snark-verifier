@@ -12,14 +12,10 @@ use halo2_proofs::{
 use rand::rngs::OsRng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use snark_verifier::loader::native::NativeLoader;
 use snark_verifier_sdk::CircuitExt;
 use snark_verifier_sdk::{
     gen_pk,
-    halo2::{
-        aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk, PoseidonTranscript,
-        POSEIDON_SPEC,
-    },
+    halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk},
     Snark,
 };
 
@@ -174,14 +170,11 @@ mod application {
     }
 }
 
-fn gen_application_snark(
-    params: &ParamsKZG<Bn256>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
-) -> Snark {
+fn gen_application_snark(params: &ParamsKZG<Bn256>) -> Snark {
     let circuit = application::StandardPlonk::rand(OsRng);
 
     let pk = gen_pk(params, &circuit, None);
-    gen_snark_shplonk(params, &pk, circuit, transcript, &mut OsRng, None::<&str>)
+    gen_snark_shplonk(params, &pk, circuit, &mut OsRng, None::<&str>)
 }
 
 fn bench(c: &mut Criterion) {
@@ -194,13 +187,11 @@ fn bench(c: &mut Criterion) {
         params
     };
 
-    let mut transcript =
-        PoseidonTranscript::<NativeLoader, _>::from_spec(vec![], POSEIDON_SPEC.clone());
-    let snarks = [(); 3].map(|_| gen_application_snark(&params_app, &mut transcript));
+    let snarks = [(); 3].map(|_| gen_application_snark(&params_app));
 
     let start1 = start_timer!(|| "Create aggregation circuit");
     let mut rng = ChaCha20Rng::from_entropy();
-    let agg_circuit = AggregationCircuit::new(&params, snarks, &mut transcript, &mut rng);
+    let agg_circuit = AggregationCircuit::new(&params, snarks, &mut rng);
     end_timer!(start1);
 
     let pk = gen_pk(&params, &agg_circuit, None);
@@ -213,15 +204,7 @@ fn bench(c: &mut Criterion) {
         |b, &(params, pk, agg_circuit)| {
             b.iter(|| {
                 let instances = agg_circuit.instances();
-                gen_proof_shplonk(
-                    params,
-                    pk,
-                    agg_circuit.clone(),
-                    instances,
-                    &mut transcript,
-                    &mut rng,
-                    None,
-                )
+                gen_proof_shplonk(params, pk, agg_circuit.clone(), instances, &mut rng, None)
             })
         },
     );

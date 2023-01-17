@@ -74,7 +74,6 @@ pub fn gen_proof<'params, C, P, V>(
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8>
@@ -112,10 +111,11 @@ where
     #[cfg(feature = "display")]
     let proof_time = start_timer!(|| "Create proof");
 
-    transcript.clear();
-    create_proof::<_, P, _, _, _, _>(params, pk, &[circuit], &[&instances], rng, transcript)
+    let mut transcript =
+        PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(vec![], POSEIDON_SPEC.clone());
+    create_proof::<_, P, _, _, _, _>(params, pk, &[circuit], &[&instances], rng, &mut transcript)
         .unwrap();
-    let proof = transcript.stream_mut().to_vec();
+    let proof = transcript.finalize();
 
     #[cfg(feature = "display")]
     end_timer!(proof_time);
@@ -150,13 +150,10 @@ pub fn gen_proof_gwc<C: Circuit<Fr>>(
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8> {
-    gen_proof::<C, ProverGWC<_>, VerifierGWC<_>>(
-        params, pk, circuit, instances, transcript, rng, path,
-    )
+    gen_proof::<C, ProverGWC<_>, VerifierGWC<_>>(params, pk, circuit, instances, rng, path)
 }
 
 /// Generates a native proof using SHPLONK multi-open scheme. Uses Poseidon for Fiat-Shamir.
@@ -167,13 +164,10 @@ pub fn gen_proof_shplonk<C: Circuit<Fr>>(
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<(&Path, &Path)>,
 ) -> Vec<u8> {
-    gen_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(
-        params, pk, circuit, instances, transcript, rng, path,
-    )
+    gen_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(params, pk, circuit, instances, rng, path)
 }
 
 /// Generates a SNARK using either SHPLONK or GWC multi-open scheme. Uses Poseidon for Fiat-Shamir.
@@ -184,7 +178,6 @@ pub fn gen_snark<'params, ConcreteCircuit, P, V>(
     params: &'params ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark
@@ -212,15 +205,8 @@ where
     );
 
     let instances = circuit.instances();
-    let proof = gen_proof::<ConcreteCircuit, P, V>(
-        params,
-        pk,
-        circuit,
-        instances.clone(),
-        transcript,
-        rng,
-        None,
-    );
+    let proof =
+        gen_proof::<ConcreteCircuit, P, V>(params, pk, circuit, instances.clone(), rng, None);
 
     let snark = Snark::new(protocol, instances, proof);
     if let Some(path) = &path {
@@ -242,13 +228,10 @@ pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark {
-    gen_snark::<ConcreteCircuit, ProverGWC<_>, VerifierGWC<_>>(
-        params, pk, circuit, transcript, rng, path,
-    )
+    gen_snark::<ConcreteCircuit, ProverGWC<_>, VerifierGWC<_>>(params, pk, circuit, rng, path)
 }
 
 /// Generates a SNARK using SHPLONK multi-open scheme. Uses Poseidon for Fiat-Shamir.
@@ -259,12 +242,11 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
-    transcript: &mut PoseidonTranscript<NativeLoader, Vec<u8>>,
     rng: &mut (impl Rng + Send),
     path: Option<impl AsRef<Path>>,
 ) -> Snark {
     gen_snark::<ConcreteCircuit, ProverSHPLONK<_>, VerifierSHPLONK<_>>(
-        params, pk, circuit, transcript, rng, path,
+        params, pk, circuit, rng, path,
     )
 }
 
