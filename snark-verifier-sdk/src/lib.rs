@@ -103,18 +103,18 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
 }
 
 pub fn read_pk<C: Circuit<Fr>>(path: &Path) -> io::Result<ProvingKey<G1Affine>> {
-    let mut f = File::open(path)?;
+    let f = File::open(path)?;
     #[cfg(feature = "display")]
     let read_time = start_timer!(|| format!("Reading pkey from {path:?}"));
 
     // BufReader is indeed MUCH faster than Read
-    // let mut bufreader = BufReader::new(f);
-    // But it's even faster to load the whole file into memory first and then process
-    let initial_buffer_size = f.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
-    let mut bufreader = Vec::with_capacity(initial_buffer_size);
-    f.read_to_end(&mut bufreader)?;
-    let pk = ProvingKey::read::<_, C>(&mut bufreader.as_slice(), SerdeFormat::RawBytesUnchecked)
-        .unwrap();
+    let mut bufreader = BufReader::new(f);
+    // But it's even faster to load the whole file into memory first and then process,
+    // HOWEVER this requires twice as much memory to initialize
+    // let initial_buffer_size = f.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
+    // let mut bufreader = Vec::with_capacity(initial_buffer_size);
+    // f.read_to_end(&mut bufreader)?;
+    let pk = ProvingKey::read::<_, C>(&mut bufreader, SerdeFormat::RawBytesUnchecked).unwrap();
 
     #[cfg(feature = "display")]
     end_timer!(read_time);
