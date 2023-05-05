@@ -39,10 +39,10 @@ impl<T: Debug> PartialEq for Value<T> {
 impl<T: Debug> Value<T> {
     fn identifier(&self) -> String {
         match self {
-            Value::Constant(_) | Value::Memory(_) => format!("{:?}", self),
-            Value::Negated(value) => format!("-({:?})", value),
-            Value::Sum(lhs, rhs) => format!("({:?} + {:?})", lhs, rhs),
-            Value::Product(lhs, rhs) => format!("({:?} * {:?})", lhs, rhs),
+            Value::Constant(_) | Value::Memory(_) => format!("{self:?}"),
+            Value::Negated(value) => format!("-({value:?})"),
+            Value::Sum(lhs, rhs) => format!("({lhs:?} + {rhs:?})"),
+            Value::Product(lhs, rhs) => format!("({lhs:?} * {rhs:?})"),
         }
     }
 }
@@ -435,7 +435,7 @@ impl EvmLoader {
 
     pub fn print_gas_metering(self: &Rc<Self>, costs: Vec<u64>) {
         for (identifier, cost) in self.gas_metering_ids.borrow().iter().zip(costs) {
-            println!("{}: {}", identifier, cost);
+            println!("{identifier}: {cost}");
         }
     }
 }

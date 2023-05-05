@@ -365,7 +365,7 @@ mod recursion {
                 .flat_map(|preprocessed| {
                     let assigned = preprocessed.assigned();
                     [assigned.x(), assigned.y()]
-                        .map(|coordinate| loader.scalar_from_assigned(coordinate.native().clone()))
+                        .map(|coordinate| loader.scalar_from_assigned(*coordinate.native()))
                 })
                 .chain(protocol.transcript_initial_state.clone())
                 .collect_vec();
@@ -410,7 +410,7 @@ mod recursion {
             .iter()
             .zip([rhs.lhs.assigned(), rhs.rhs.assigned()].iter())
             .map(|(lhs, rhs)| {
-                loader.ecc_chip().select(&mut loader.ctx_mut().main(0), lhs, rhs, *condition)
+                loader.ecc_chip().select(loader.ctx_mut().main(0), lhs, rhs, *condition)
             })
             .collect::<Vec<_>>()
             .try_into()
@@ -533,8 +533,8 @@ mod recursion {
             let mut circuit = Self {
                 svk,
                 default_accumulator,
-                app: app.into(),
-                previous: previous.into(),
+                app: app,
+                previous: previous,
                 round,
                 instances,
                 as_proof,
@@ -570,7 +570,7 @@ mod recursion {
                 &self.svk,
                 &loader,
                 &self.previous,
-                Some(preprocessed_digest.clone()),
+                Some(preprocessed_digest),
             );
 
             let default_accmulator = self.load_default_accumulator(&loader).unwrap();

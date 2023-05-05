@@ -55,7 +55,7 @@ fn get_create2_address_from_hash(
     ]
     .concat();
 
-    let hash = keccak256(&bytes);
+    let hash = keccak256(bytes);
 
     let mut bytes = [0u8; 20];
     bytes.copy_from_slice(&hash[12..]);
