@@ -4,15 +4,15 @@ use halo2_base::{
     gates::{
         builder::{
             CircuitBuilderStage, FlexGateConfigParams, GateThreadBuilder,
-            MultiPhaseThreadBreakPoints, RangeCircuitBuilder,
+            MultiPhaseThreadBreakPoints, RangeCircuitBuilder, RangeWithInstanceCircuitBuilder,
+            RangeWithInstanceConfig,
         },
-        range::RangeConfig,
         RangeChip,
     },
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::bn256::{Bn256, Fr, G1Affine},
-        plonk::{self, Circuit, Column, ConstraintSystem, Instance, Selector},
+        plonk::{self, Circuit, ConstraintSystem, Selector},
         poly::{
             commitment::{Params, ParamsProver},
             kzg::commitment::ParamsKZG,
@@ -149,63 +149,6 @@ impl AggregationConfigParams {
     pub fn from_path(path: impl AsRef<Path>) -> Self {
         serde_json::from_reader(File::open(path).expect("Aggregation config path does not exist"))
             .unwrap()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RangeWithInstanceConfig<F: ScalarField> {
-    pub range: RangeConfig<F>,
-    pub instance: Column<Instance>,
-}
-
-/// This is an extension of [`RangeCircuitBuilder`] that adds support for public instances (aka public inputs+outputs)
-///
-/// The intended design is that a [`GateThreadBuilder`] is populated and then produces some assigned instances, which are supplied as `assigned_instances` to this struct.
-/// The [`Circuit`] implementation for this struct will then expose these instances and constrain them using the Halo2 API.
-#[derive(Clone, Debug)]
-pub struct RangeWithInstanceCircuitBuilder<F: ScalarField> {
-    pub circuit: RangeCircuitBuilder<F>,
-    pub assigned_instances: Vec<AssignedValue<F>>,
-}
-
-impl<F: ScalarField> RangeWithInstanceCircuitBuilder<F> {
-    pub fn keygen(
-        builder: GateThreadBuilder<F>,
-        assigned_instances: Vec<AssignedValue<F>>,
-    ) -> Self {
-        Self { circuit: RangeCircuitBuilder::keygen(builder), assigned_instances }
-    }
-
-    pub fn mock(builder: GateThreadBuilder<F>, assigned_instances: Vec<AssignedValue<F>>) -> Self {
-        Self { circuit: RangeCircuitBuilder::mock(builder), assigned_instances }
-    }
-
-    pub fn prover(
-        builder: GateThreadBuilder<F>,
-        assigned_instances: Vec<AssignedValue<F>>,
-        break_points: MultiPhaseThreadBreakPoints,
-    ) -> Self {
-        Self { circuit: RangeCircuitBuilder::prover(builder, break_points), assigned_instances }
-    }
-
-    pub fn new(circuit: RangeCircuitBuilder<F>, assigned_instances: Vec<AssignedValue<F>>) -> Self {
-        Self { circuit, assigned_instances }
-    }
-
-    pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> FlexGateConfigParams {
-        self.circuit.0.builder.borrow().config(k as usize, minimum_rows)
-    }
-
-    pub fn break_points(&self) -> MultiPhaseThreadBreakPoints {
-        self.circuit.0.break_points.borrow().clone()
-    }
-
-    pub fn instance_count(&self) -> usize {
-        self.assigned_instances.len()
-    }
-
-    pub fn instance(&self) -> Vec<F> {
-        self.assigned_instances.iter().map(|v| *v.value()).collect()
     }
 }
 
@@ -424,54 +367,6 @@ impl AggregationCircuit {
 
     pub fn instance(&self) -> Vec<Fr> {
         self.inner.instance()
-    }
-}
-
-impl<F: ScalarField> Circuit<F> for RangeWithInstanceCircuitBuilder<F> {
-    type Config = RangeWithInstanceConfig<F>;
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        unimplemented!()
-    }
-
-    fn configure(meta: &mut plonk::ConstraintSystem<F>) -> Self::Config {
-        let range = RangeCircuitBuilder::configure(meta);
-        let instance = meta.instance_column();
-        meta.enable_equality(instance);
-        RangeWithInstanceConfig { range, instance }
-    }
-
-    fn synthesize(
-        &self,
-        config: Self::Config,
-        mut layouter: impl Layouter<F>,
-    ) -> Result<(), plonk::Error> {
-        // copied from RangeCircuitBuilder::synthesize but with extra logic to expose public instances
-        let range = config.range;
-        let circuit = &self.circuit.0;
-        range.load_lookup_table(&mut layouter).expect("load lookup table should not fail");
-        // we later `take` the builder, so we need to save this value
-        let witness_gen_only = circuit.builder.borrow().witness_gen_only();
-        let assigned_advices = circuit.sub_synthesize(
-            &range.gate,
-            &range.lookup_advice,
-            &range.q_lookup,
-            &mut layouter,
-        );
-
-        if !witness_gen_only {
-            // expose public instances
-            let mut layouter = layouter.namespace(|| "expose");
-            for (i, instance) in self.assigned_instances.iter().enumerate() {
-                let cell = instance.cell.unwrap();
-                let (cell, _) = assigned_advices
-                    .get(&(cell.context_id, cell.offset))
-                    .expect("instance not assigned");
-                layouter.constrain_instance(*cell, config.instance, i);
-            }
-        }
-        Ok(())
     }
 }
 
