@@ -150,7 +150,7 @@ impl<F: PrimeField> Domain<F> {
         match rotation.0.cmp(&0) {
             Ordering::Equal => scalar,
             Ordering::Greater => scalar * self.gen.pow_vartime([rotation.0 as u64]),
-            Ordering::Less => scalar * self.gen_inv.pow_vartime([(-rotation.0) as u64]),
+            Ordering::Less => scalar * self.gen_inv.pow_vartime([(-(rotation.0 as i64)) as u64]),
         }
     }
 }
