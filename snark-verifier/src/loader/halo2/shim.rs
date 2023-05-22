@@ -132,7 +132,7 @@ mod halo2_lib {
     use crate::halo2_proofs::halo2curves::CurveAffineExt;
     use crate::{
         loader::halo2::{EccInstructions, IntegerInstructions},
-        util::arithmetic::{CurveAffine, Field},
+        util::arithmetic::CurveAffine,
     };
     use halo2_base::{
         self,
@@ -140,14 +140,14 @@ mod halo2_lib {
         AssignedValue,
         QuantumCell::{Constant, Existing},
     };
+    use halo2_ecc::bigint::ProperCrtUint;
     use halo2_ecc::{
-        bigint::CRTInteger,
-        ecc::{fixed_base::FixedEcPoint, BaseFieldEccChip, EcPoint},
+        ecc::{BaseFieldEccChip, EcPoint},
         fields::{FieldChip, PrimeField},
     };
     use std::ops::Deref;
 
-    type AssignedInteger<C> = CRTInteger<<C as CurveAffine>::ScalarExt>;
+    type AssignedInteger<C> = ProperCrtUint<<C as CurveAffine>::ScalarExt>;
     type AssignedEcPoint<C> = EcPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<C>>;
 
     impl<F: PrimeField> IntegerInstructions<F> for GateChip<F> {
@@ -250,19 +250,11 @@ mod halo2_lib {
         }
 
         fn assign_constant(&self, ctx: &mut Self::Context, point: C) -> Self::AssignedEcPoint {
-            let fixed = FixedEcPoint::<C::Scalar, C>::from_curve(
-                point,
-                self.field_chip.num_limbs,
-                self.field_chip.limb_bits,
-            );
-            FixedEcPoint::assign(fixed, self.field_chip(), ctx.main(0))
+            self.assign_constant_point(ctx.main(0), point)
         }
 
         fn assign_point(&self, ctx: &mut Self::Context, point: C) -> Self::AssignedEcPoint {
-            let assigned = self.assign_point(ctx.main(0), point);
-            let is_valid = self.is_on_curve_or_infinity::<C>(ctx.main(0), &assigned);
-            self.field_chip().gate().assert_is_const(ctx.main(0), &is_valid, &C::Scalar::one());
-            assigned
+            self.assign_point(ctx.main(0), point)
         }
 
         fn sum_with_const(
@@ -274,10 +266,13 @@ mod halo2_lib {
             let constant = if bool::from(constant.is_identity()) {
                 None
             } else {
-                let constant = EccInstructions::<C>::assign_constant(self, ctx, constant);
+                let constant = EccInstructions::assign_constant(self, ctx, constant);
                 Some(constant)
             };
-            self.sum::<C>(ctx.main(0), constant.iter().chain(values.iter().map(Deref::deref)))
+            self.sum::<C>(
+                ctx.main(0),
+                constant.into_iter().chain(values.iter().map(|v| v.deref().clone())),
+            )
         }
 
         fn variable_base_msm(
@@ -331,7 +326,7 @@ mod halo2_lib {
             a: &Self::AssignedEcPoint,
             b: &Self::AssignedEcPoint,
         ) {
-            self.assert_equal(ctx.main(0), a, b);
+            self.assert_equal(ctx.main(0), a.clone(), b.clone());
         }
     }
 }

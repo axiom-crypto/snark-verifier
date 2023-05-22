@@ -333,7 +333,7 @@ mod recursion {
         },
         AssignedValue,
     };
-    use halo2_ecc::bn254::FpChip;
+    use halo2_ecc::{bn254::FpChip, ecc::EcPoint};
     use halo2_proofs::plonk::{Column, Instance};
     use snark_verifier::loader::halo2::{EccInstructions, IntegerInstructions};
 
@@ -410,7 +410,12 @@ mod recursion {
             .iter()
             .zip([rhs.lhs.assigned(), rhs.rhs.assigned()].iter())
             .map(|(lhs, rhs)| {
-                loader.ecc_chip().select(loader.ctx_mut().main(0), lhs, rhs, *condition)
+                loader.ecc_chip().select(
+                    loader.ctx_mut().main(0),
+                    EcPoint::clone(&lhs),
+                    EcPoint::clone(&rhs),
+                    *condition,
+                )
             })
             .collect::<Vec<_>>()
             .try_into()
@@ -566,12 +571,8 @@ mod recursion {
             let loader = Halo2Loader::new(ecc_chip, builder);
             let (mut app_instances, app_accumulators) =
                 succinct_verify(&self.svk, &loader, &self.app, None);
-            let (mut previous_instances, previous_accumulators) = succinct_verify(
-                &self.svk,
-                &loader,
-                &self.previous,
-                Some(preprocessed_digest),
-            );
+            let (mut previous_instances, previous_accumulators) =
+                succinct_verify(&self.svk, &loader, &self.previous, Some(preprocessed_digest));
 
             let default_accmulator = self.load_default_accumulator(&loader).unwrap();
             let previous_accumulators = previous_accumulators

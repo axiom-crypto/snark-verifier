@@ -378,13 +378,12 @@ mod aggregation {
             let lhs = lhs.assigned();
             let rhs = rhs.assigned();
             let assigned_instances = lhs
-                .x
-                .truncation
-                .limbs
+                .x()
+                .limbs()
                 .iter()
-                .chain(lhs.y.truncation.limbs.iter())
-                .chain(rhs.x.truncation.limbs.iter())
-                .chain(rhs.y.truncation.limbs.iter())
+                .chain(lhs.y().limbs().iter())
+                .chain(rhs.x().limbs().iter())
+                .chain(rhs.y().limbs().iter())
                 .copied()
                 .collect_vec();
 
