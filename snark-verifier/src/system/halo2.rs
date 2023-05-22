@@ -111,7 +111,7 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
         .chain((0..num_proof).flat_map(move |t| polynomials.permutation_z_queries::<true>(t)))
         .chain((0..num_proof).flat_map(move |t| polynomials.lookup_queries::<true>(t)))
         .collect();
-
+    // `quotient_query()` is not needed in evaluations because the verifier can compute it itself from the other evaluations.
     let queries = (0..num_proof)
         .flat_map(|t| {
             iter::empty()

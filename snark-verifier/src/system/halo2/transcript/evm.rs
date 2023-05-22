@@ -73,6 +73,8 @@ where
         &self.loader
     }
 
+    /// Does not allow the input to be a one-byte sequence, because the Transcript trait only supports writing scalars and elliptic curve points.
+    /// If the one-byte sequence [0x01] is a valid input to the transcript, the empty input [] will have the same transcript result as [0x01].
     fn squeeze_challenge(&mut self) -> Scalar {
         let len = if self.buf.len() == 0x20 {
             assert_eq!(self.loader.ptr(), self.buf.end());

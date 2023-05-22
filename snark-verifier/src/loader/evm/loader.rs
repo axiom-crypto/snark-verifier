@@ -648,7 +648,9 @@ where
         self.ec_point(Value::Constant((x, y)))
     }
 
-    fn ec_point_assert_eq(&self, _: &str, _: &EcPoint, _: &EcPoint) {}
+    fn ec_point_assert_eq(&self, _: &str, _: &EcPoint, _: &EcPoint) {
+        unimplemented!()
+    }
 
     fn multi_scalar_multiplication(
         pairs: &[(&<Self as ScalarLoader<C::Scalar>>::LoadedScalar, &EcPoint)],
@@ -672,7 +674,9 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
         self.scalar(Value::Constant(fe_to_u256(*value)))
     }
 
-    fn assert_eq(&self, _: &str, _: &Scalar, _: &Scalar) {}
+    fn assert_eq(&self, _: &str, _: &Scalar, _: &Scalar) {
+        unimplemented!()
+    }
 
     fn sum_with_coeff_and_const(&self, values: &[(F, &Scalar)], constant: F) -> Scalar {
         if values.is_empty() {
