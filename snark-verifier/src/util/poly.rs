@@ -1,6 +1,7 @@
 //! Polynomial.
 
 use crate::util::{arithmetic::Field, parallelize};
+use itertools::Itertools;
 use rand::Rng;
 use std::{
     iter::{self, Sum},
@@ -89,7 +90,7 @@ impl<'a, F: Field> Add<&'a Polynomial<F>> for Polynomial<F> {
 
     fn add(mut self, rhs: &'a Polynomial<F>) -> Polynomial<F> {
         parallelize(&mut self.0, |(lhs, start)| {
-            for (lhs, rhs) in lhs.iter_mut().zip(rhs.0[start..].iter()) {
+            for (lhs, rhs) in lhs.iter_mut().zip_eq(rhs.0[start..].iter()) {
                 *lhs += *rhs;
             }
         });
@@ -102,7 +103,7 @@ impl<'a, F: Field> Sub<&'a Polynomial<F>> for Polynomial<F> {
 
     fn sub(mut self, rhs: &'a Polynomial<F>) -> Polynomial<F> {
         parallelize(&mut self.0, |(lhs, start)| {
-            for (lhs, rhs) in lhs.iter_mut().zip(rhs.0[start..].iter()) {
+            for (lhs, rhs) in lhs.iter_mut().zip_eq(rhs.0[start..].iter()) {
                 *lhs -= *rhs;
             }
         });
