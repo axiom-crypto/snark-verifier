@@ -58,6 +58,7 @@ mod native {
             dk: &Self::DecidingKey,
             accumulators: Vec<IpaAccumulator<C, NativeLoader>>,
         ) -> Result<(), Error> {
+            assert!(!accumulators.is_empty());
             accumulators
                 .into_iter()
                 .map(|accumulator| Self::decide(dk, accumulator))

@@ -19,12 +19,7 @@ impl<M: MultiMillerLoop> KzgDecidingKey<M> {
         g2: M::G2Affine,
         s_g2: M::G2Affine,
     ) -> Self {
-        Self {
-            svk: svk.into(),
-            g2,
-            s_g2,
-            _marker: PhantomData,
-        }
+        Self { svk: svk.into(), g2, s_g2, _marker: PhantomData }
     }
 }
 
@@ -67,19 +62,16 @@ mod native {
             KzgAccumulator { lhs, rhs }: KzgAccumulator<M::G1Affine, NativeLoader>,
         ) -> Result<(), Error> {
             let terms = [(&lhs, &dk.g2.into()), (&rhs, &(-dk.s_g2).into())];
-            bool::from(
-                M::multi_miller_loop(&terms)
-                    .final_exponentiation()
-                    .is_identity(),
-            )
-            .then_some(())
-            .ok_or_else(|| Error::AssertionFailure("e(lhs, g2)·e(rhs, -s_g2) == O".to_string()))
+            bool::from(M::multi_miller_loop(&terms).final_exponentiation().is_identity())
+                .then_some(())
+                .ok_or_else(|| Error::AssertionFailure("e(lhs, g2)·e(rhs, -s_g2) == O".to_string()))
         }
 
         fn decide_all(
             dk: &Self::DecidingKey,
             accumulators: Vec<KzgAccumulator<M::G1Affine, NativeLoader>>,
         ) -> Result<(), Error> {
+            assert!(!accumulators.is_empty());
             accumulators
                 .into_iter()
                 .map(|accumulator| Self::decide(dk, accumulator))
