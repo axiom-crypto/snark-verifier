@@ -49,22 +49,23 @@ pub trait FieldOps:
 
 /// Batch invert [`PrimeField`] elements and multiply all with given coefficient.
 pub fn batch_invert_and_mul<F: PrimeField>(values: &mut [F], coeff: &F) {
+    if values.is_empty() {
+        return;
+    }
     let products = values
         .iter()
-        .filter(|value| !value.is_zero_vartime())
         .scan(F::one(), |acc, value| {
             *acc *= value;
             Some(*acc)
         })
         .collect_vec();
 
-    let mut all_product_inv = products.last().unwrap().invert().unwrap() * coeff;
+    let mut all_product_inv = Option::<F>::from(products.last().unwrap().invert())
+        .expect("Attempted to batch invert an array containing zero")
+        * coeff;
 
-    for (value, product) in values
-        .iter_mut()
-        .rev()
-        .filter(|value| !value.is_zero_vartime())
-        .zip(products.into_iter().rev().skip(1).chain(Some(F::one())))
+    for (value, product) in
+        values.iter_mut().rev().zip(products.into_iter().rev().skip(1).chain(Some(F::one())))
     {
         let mut inv = all_product_inv * product;
         mem::swap(value, &mut inv);
