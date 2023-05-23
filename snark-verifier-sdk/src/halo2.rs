@@ -121,14 +121,10 @@ where
     #[cfg(feature = "display")]
     end_timer!(proof_time);
 
-    if let Some((instance_path, proof_path)) = path {
-        write_instances(&instances, instance_path);
-        fs::write(proof_path, &proof).unwrap();
-    }
-
-    debug_assert!({
+    // validate proof before caching
+    assert!({
         let mut transcript_read =
-            PoseidonTranscript::<NativeLoader, &[u8]>::new::<SECURE_MDS>(proof.as_slice());
+            PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(&proof[..], POSEIDON_SPEC.clone());
         VerificationStrategy::<_, V>::finalize(
             verify_proof::<_, V, _, _, _>(
                 params.verifier_params(),
@@ -140,6 +136,11 @@ where
             .unwrap(),
         )
     });
+
+    if let Some((instance_path, proof_path)) = path {
+        write_instances(&instances, instance_path);
+        fs::write(proof_path, &proof).unwrap();
+    }
 
     proof
 }

@@ -24,6 +24,8 @@ use halo2_base::{
 use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
+#[cfg(debug_assertions)]
+use snark_verifier::util::arithmetic::fe_to_limbs;
 use snark_verifier::{
     loader::{
         self,
@@ -34,7 +36,6 @@ use snark_verifier::{
         kzg::{KzgAccumulator, KzgAsProvingKey, KzgAsVerifyingKey, KzgSuccinctVerifyingKey},
         AccumulationScheme, AccumulationSchemeProver, PolynomialCommitmentScheme,
     },
-    util::arithmetic::fe_to_limbs,
     verifier::SnarkVerifier,
 };
 use std::{
