@@ -114,13 +114,10 @@ pub fn compile_yul(code: &str) -> Vec<u8> {
         .arg("-")
         .spawn()
         .unwrap();
-    cmd.stdin
-        .take()
-        .unwrap()
-        .write_all(code.as_bytes())
-        .unwrap();
+    cmd.stdin.take().unwrap().write_all(code.as_bytes()).unwrap();
     let output = cmd.wait_with_output().unwrap().stdout;
     let binary = *split_by_ascii_whitespace(&output).last().unwrap();
+    assert!(!binary.is_empty());
     hex::decode(binary).unwrap()
 }
 
@@ -136,5 +133,22 @@ fn split_by_ascii_whitespace(bytes: &[u8]) -> Vec<&[u8]> {
             start = Some(idx);
         }
     }
+    if let Some(last) = start {
+        split.push(&bytes[last..]);
+    }
     split
+}
+
+#[test]
+fn test_split_by_ascii_whitespace_1() {
+    let bytes = b" \x01 \x02   \x03";
+    let split = split_by_ascii_whitespace(bytes);
+    assert_eq!(split, [b"\x01", b"\x02", b"\x03"]);
+}
+
+#[test]
+fn test_split_by_ascii_whitespace_2() {
+    let bytes = b"123456789abc";
+    let split = split_by_ascii_whitespace(bytes);
+    assert_eq!(split, [b"123456789abc"]);
 }
