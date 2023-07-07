@@ -1638,11 +1638,31 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2-base"
 version = "0.3.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=release-0.3.0#238b89e7562d52166c1e08154b7c9759f65322a6"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.3.0#4060f2a703ca5ca3ed03fd869cfdf0c778aae240"
 dependencies = [
  "ff",
- "halo2_proofs 0.2.0",
  "halo2_proofs 0.2.0 (git+https://github.com/privacy-scaling-explorations/halo2.git?tag=v2023_02_02)",
+ "halo2_proofs 0.2.0 (git+https://github.com/axiom-crypto/halo2.git?rev=98bc83b)",
+ "itertools",
+ "log",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand_chacha",
+ "rayon",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "halo2-base"
+version = "0.3.0"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#da451dae483203e6433b94d7769e9d33651f9350"
+dependencies = [
+ "ff",
+ "halo2_proofs 0.2.0 (git+https://github.com/privacy-scaling-explorations/halo2.git?tag=v2023_02_02)",
+ "halo2_proofs 0.2.0 (git+https://github.com/axiom-crypto/halo2.git?branch=main)",
  "itertools",
  "jemallocator",
  "log",
@@ -1659,11 +1679,11 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.3.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=release-0.3.0#238b89e7562d52166c1e08154b7c9759f65322a6"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.3.0#4060f2a703ca5ca3ed03fd869cfdf0c778aae240"
 dependencies = [
  "ff",
  "group",
- "halo2-base",
+ "halo2-base 0.3.0 (git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.3.0)",
  "itertools",
  "num-bigint",
  "num-integer",
@@ -1674,6 +1694,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "test-case",
 ]
 
 [[package]]
@@ -1688,23 +1709,6 @@ dependencies = [
  "pasta_curves",
  "rand_core",
  "rayon",
-]
-
-[[package]]
-name = "halo2_proofs"
-version = "0.2.0"
-dependencies = [
- "blake2b_simd",
- "crossbeam",
- "ff",
- "group",
- "halo2curves 0.3.1",
- "rand",
- "rand_core",
- "rayon",
- "rustc-hash",
- "sha3 0.9.1",
- "tracing",
 ]
 
 [[package]]
@@ -1732,6 +1736,42 @@ dependencies = [
  "halo2curves 0.3.1 (git+https://github.com/privacy-scaling-explorations/halo2curves.git?tag=0.3.1)",
  "rand_core",
  "rayon",
+ "sha3 0.9.1",
+ "tracing",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.2.0"
+source = "git+https://github.com/axiom-crypto/halo2.git?branch=main#98bc83be43af623f4f1a00c8c95db081844773c4"
+dependencies = [
+ "blake2b_simd",
+ "crossbeam",
+ "ff",
+ "group",
+ "halo2curves 0.3.1 (git+https://github.com/axiom-crypto/halo2.git?branch=main)",
+ "rand",
+ "rand_core",
+ "rayon",
+ "rustc-hash",
+ "sha3 0.9.1",
+ "tracing",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.2.0"
+source = "git+https://github.com/axiom-crypto/halo2.git?rev=98bc83b#98bc83be43af623f4f1a00c8c95db081844773c4"
+dependencies = [
+ "blake2b_simd",
+ "crossbeam",
+ "ff",
+ "group",
+ "halo2curves 0.3.1 (git+https://github.com/axiom-crypto/halo2.git?rev=98bc83b)",
+ "rand",
+ "rand_core",
+ "rayon",
+ "rustc-hash",
  "sha3 0.9.1",
  "tracing",
 ]
@@ -1773,6 +1813,24 @@ dependencies = [
 [[package]]
 name = "halo2curves"
 version = "0.3.1"
+source = "git+https://github.com/privacy-scaling-explorations/halo2curves.git?tag=0.3.1#9b67e19bca30a35208b0c1b41c1723771e2c9f49"
+dependencies = [
+ "ff",
+ "group",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "static_assertions",
+ "subtle",
+]
+
+[[package]]
+name = "halo2curves"
+version = "0.3.1"
+source = "git+https://github.com/axiom-crypto/halo2.git?branch=main#98bc83be43af623f4f1a00c8c95db081844773c4"
 dependencies = [
  "ff",
  "group",
@@ -1790,7 +1848,7 @@ dependencies = [
 [[package]]
 name = "halo2curves"
 version = "0.3.1"
-source = "git+https://github.com/privacy-scaling-explorations/halo2curves.git?tag=0.3.1#9b67e19bca30a35208b0c1b41c1723771e2c9f49"
+source = "git+https://github.com/axiom-crypto/halo2.git?rev=98bc83b#98bc83be43af623f4f1a00c8c95db081844773c4"
 dependencies = [
  "ff",
  "group",
@@ -1800,6 +1858,7 @@ dependencies = [
  "pasta_curves",
  "rand",
  "rand_core",
+ "serde",
  "static_assertions",
  "subtle",
 ]
@@ -2802,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "poseidon-circuit"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/poseidon-circuit.git#079e3f5bfc30d63ded672a97850e3c160504bfad"
+source = "git+https://github.com/scroll-tech/poseidon-circuit.git?rev=50015b7#50015b7cfbd5fe3263ec683cb291396c1b99cd1f"
 dependencies = [
  "bitvec 1.0.1",
  "halo2_proofs 0.2.0 (git+https://github.com/privacy-scaling-explorations/halo2.git?tag=v2022_09_10)",
@@ -3708,7 +3767,7 @@ dependencies = [
  "ark-std",
  "bytes",
  "crossterm",
- "halo2-base",
+ "halo2-base 0.3.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop)",
  "halo2-ecc",
  "hex",
  "itertools",
@@ -3742,7 +3801,7 @@ dependencies = [
  "crossterm",
  "eth-types",
  "ethereum-types 0.14.1",
- "halo2-base",
+ "halo2-base 0.3.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop)",
  "hex",
  "itertools",
  "lazy_static",
@@ -3924,6 +3983,41 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be55cf8942feac5c765c2c993422806843c9a9a45d4d5c407ad6dd2ea95eb9b6"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test-case"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a1d6e7bde536b0412f20765b76e921028059adfd1b90d8974d33fd3c91b25df"
+dependencies = [
+ "test-case-macros",
+]
+
+[[package]]
+name = "test-case-core"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d10394d5d1e27794f772b6fc854c7e91a2dc26e2cbf807ad523370c2a59c0cee"
+dependencies = [
+ "cfg-if",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "test-case-macros"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeb9a44b1c6a54c1ba58b152797739dba2a83ca74e18168a68c980eb142f9404"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "test-case-core",
 ]
 
 [[package]]
@@ -4689,7 +4783,3 @@ dependencies = [
  "strum_macros",
  "subtle",
 ]
-
-[[patch.unused]]
-name = "poseidon"
-version = "0.2.0"
