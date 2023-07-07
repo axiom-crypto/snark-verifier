@@ -21,7 +21,7 @@ halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "
 snark-verifier = { path = "../snark-verifier", default-features = false }
 
 # loader_evm
-ethereum-types = { version = "=0.14.1", default-features = false, features = ["std"], optional = true }
+ethereum-types = { version = "0.14.1", default-features = false, features = ["std"], optional = true }
 # sha3 = { version = "0.10", optional = true }
 # revm = { version = "2.3.1", optional = true }
 # bytes = { version = "1.2", optional = true }
