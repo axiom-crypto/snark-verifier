@@ -3,10 +3,11 @@ use crate::{BITS, LIMBS};
 use halo2_base::{
     gates::{
         builder::{
-            CircuitBuilderStage, FlexGateConfigParams, GateThreadBuilder,
-            MultiPhaseThreadBreakPoints, RangeCircuitBuilder, RangeWithInstanceCircuitBuilder,
-            RangeWithInstanceConfig,
+            BaseConfigParams, CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints,
+            PublicBaseConfig, RangeCircuitBuilder, RangeWithInstanceCircuitBuilder,
+            BASE_CONFIG_PARAMS,
         },
+        flex_gate::GateStrategy,
         RangeChip,
     },
     halo2_proofs::{
@@ -38,12 +39,7 @@ use snark_verifier::{
     },
     verifier::SnarkVerifier,
 };
-use std::{
-    env::{set_var, var},
-    fs::File,
-    path::Path,
-    rc::Rc,
-};
+use std::{fs::File, path::Path, rc::Rc};
 
 use super::{CircuitExt, PoseidonTranscript, Snark, POSEIDON_SPEC};
 
@@ -143,7 +139,7 @@ where
 
 /// Same as `FlexGateConfigParams` except we assume a single Phase and default 'Vertical' strategy.
 /// Also adds `lookup_bits` field.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct AggregationConfigParams {
     pub degree: u32,
     pub num_advice: usize,
@@ -156,6 +152,19 @@ impl AggregationConfigParams {
     pub fn from_path(path: impl AsRef<Path>) -> Self {
         serde_json::from_reader(File::open(path).expect("Aggregation config path does not exist"))
             .unwrap()
+    }
+}
+
+impl From<AggregationConfigParams> for BaseConfigParams {
+    fn from(params: AggregationConfigParams) -> Self {
+        BaseConfigParams {
+            strategy: GateStrategy::Vertical,
+            k: params.degree as usize,
+            num_advice_per_phase: vec![params.num_advice],
+            num_lookup_advice_per_phase: vec![params.num_lookup_advice],
+            num_fixed: params.num_fixed,
+            lookup_bits: Some(params.lookup_bits),
+        }
     }
 }
 
@@ -314,11 +323,12 @@ impl AggregationCircuit {
     where
         AS: for<'a> Halo2KzgAccumulationScheme<'a>,
     {
-        let lookup_bits = params.k() as usize - 1; // almost always we just use the max lookup bits possible, which is k - 1 because of blinding factors
+        let lookup_bits = BASE_CONFIG_PARAMS
+            .with(|conf| conf.borrow().lookup_bits)
+            .unwrap_or(params.k() as usize - 1);
         let circuit =
             Self::new::<AS>(CircuitBuilderStage::Keygen, None, lookup_bits, params, snarks);
         circuit.config(params.k(), Some(10));
-        set_var("LOOKUP_BITS", lookup_bits.to_string());
         circuit
     }
 
@@ -331,18 +341,16 @@ impl AggregationCircuit {
     where
         AS: for<'a> Halo2KzgAccumulationScheme<'a>,
     {
-        let lookup_bits: usize = var("LOOKUP_BITS").expect("LOOKUP_BITS not set").parse().unwrap();
-        let circuit = Self::new::<AS>(
+        let lookup_bits = BASE_CONFIG_PARAMS
+            .with(|conf| conf.borrow().lookup_bits)
+            .unwrap_or(params.k() as usize - 1);
+        Self::new::<AS>(
             CircuitBuilderStage::Prover,
             Some(break_points),
             lookup_bits,
             params,
             snarks,
-        );
-        let minimum_rows = var("MINIMUM_ROWS").map(|s| s.parse().unwrap_or(10)).unwrap_or(10);
-        circuit.config(params.k(), Some(minimum_rows));
-        set_var("LOOKUP_BITS", lookup_bits.to_string());
-        circuit
+        )
     }
 
     /// Re-expose the previous public instances of aggregated snarks again.
@@ -359,7 +367,7 @@ impl AggregationCircuit {
         &self.as_proof[..]
     }
 
-    pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> FlexGateConfigParams {
+    pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> BaseConfigParams {
         self.inner.config(k, minimum_rows)
     }
 
@@ -386,12 +394,12 @@ impl<F: ScalarField> CircuitExt<F> for RangeWithInstanceCircuitBuilder<F> {
     }
 
     fn selectors(config: &Self::Config) -> Vec<Selector> {
-        config.range.gate.basic_gates[0].iter().map(|gate| gate.q_enable).collect()
+        config.base.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
     }
 }
 
 impl Circuit<Fr> for AggregationCircuit {
-    type Config = RangeWithInstanceConfig<Fr>;
+    type Config = PublicBaseConfig<Fr>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {

@@ -1,5 +1,9 @@
 use aggregation::{AggregationCircuit, AggregationConfigParams};
-use halo2_base::{gates::builder::CircuitBuilderStage, halo2_proofs, utils::fs::gen_srs};
+use halo2_base::{
+    gates::builder::{set_lookup_bits, CircuitBuilderStage},
+    halo2_proofs,
+    utils::fs::gen_srs,
+};
 use halo2_proofs::{
     dev::MockProver,
     halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
@@ -26,7 +30,7 @@ use snark_verifier::{
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, SnarkVerifier},
 };
-use std::{env::set_var, fs::File, io::Cursor, rc::Rc};
+use std::{fs::File, io::Cursor, rc::Rc};
 
 const LIMBS: usize = 3;
 const BITS: usize = 88;
@@ -200,20 +204,16 @@ mod aggregation {
 
     use super::halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
-        plonk::{self, Circuit, Column, Instance},
+        plonk::{self, Circuit},
     };
     use super::{As, BITS, LIMBS};
     use super::{Fr, G1Affine};
-    use halo2_base::{
-        gates::{
-            builder::{
-                assign_threads_in, CircuitBuilderStage, FlexGateConfigParams, GateThreadBuilder,
-                MultiPhaseThreadBreakPoints, RangeCircuitBuilder,
-            },
-            range::RangeConfig,
-            RangeChip,
+    use halo2_base::gates::{
+        builder::{
+            BaseConfigParams, CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints,
+            PublicBaseConfig, RangeWithInstanceCircuitBuilder,
         },
-        AssignedValue, SKIP_FIRST_PASS,
+        RangeChip,
     };
     use halo2_ecc::bn254::FpChip;
     use itertools::Itertools;
@@ -228,7 +228,7 @@ mod aggregation {
         util::arithmetic::fe_to_limbs,
         verifier::{plonk::PlonkProtocol, SnarkVerifier},
     };
-    use std::{collections::HashMap, rc::Rc};
+    use std::rc::Rc;
 
     const T: usize = 3;
     const RATE: usize = 2;
@@ -309,17 +309,10 @@ mod aggregation {
         pub lookup_bits: usize,
     }
 
-    #[derive(Clone)]
-    pub struct AggregationConfig {
-        pub range: RangeConfig<Fr>,
-        pub instance: Column<Instance>,
-    }
-
     #[derive(Clone, Debug)]
     pub struct AggregationCircuit {
-        pub circuit: RangeCircuitBuilder<Fr>,
+        pub inner: RangeWithInstanceCircuitBuilder<Fr>,
         pub as_proof: Vec<u8>,
-        pub assigned_instances: Vec<AssignedValue<Fr>>,
     }
 
     impl AggregationCircuit {
@@ -398,22 +391,28 @@ mod aggregation {
             }
 
             let builder = loader.take_ctx();
-            let circuit = match stage {
-                CircuitBuilderStage::Mock => RangeCircuitBuilder::mock(builder),
-                CircuitBuilderStage::Keygen => RangeCircuitBuilder::keygen(builder),
-                CircuitBuilderStage::Prover => {
-                    RangeCircuitBuilder::prover(builder, break_points.unwrap())
+            let inner = match stage {
+                CircuitBuilderStage::Mock => {
+                    RangeWithInstanceCircuitBuilder::mock(builder, assigned_instances)
                 }
+                CircuitBuilderStage::Keygen => {
+                    RangeWithInstanceCircuitBuilder::keygen(builder, assigned_instances)
+                }
+                CircuitBuilderStage::Prover => RangeWithInstanceCircuitBuilder::prover(
+                    builder,
+                    assigned_instances,
+                    break_points.unwrap(),
+                ),
             };
-            Self { circuit, as_proof, assigned_instances }
+            Self { inner, as_proof }
         }
 
-        pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> FlexGateConfigParams {
-            self.circuit.0.builder.borrow().config(k as usize, minimum_rows)
+        pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> BaseConfigParams {
+            self.inner.circuit.0.builder.borrow().config(k as usize, minimum_rows)
         }
 
         pub fn break_points(&self) -> MultiPhaseThreadBreakPoints {
-            self.circuit.0.break_points.borrow().clone()
+            self.inner.circuit.0.break_points.borrow().clone()
         }
 
         pub fn num_instance() -> Vec<usize> {
@@ -422,7 +421,7 @@ mod aggregation {
         }
 
         pub fn instances(&self) -> Vec<Vec<Fr>> {
-            vec![self.assigned_instances.iter().map(|v| *v.value()).collect_vec()]
+            vec![self.inner.assigned_instances.iter().map(|v| *v.value()).collect_vec()]
         }
 
         pub fn accumulator_indices() -> Vec<(usize, usize)> {
@@ -431,7 +430,7 @@ mod aggregation {
     }
 
     impl Circuit<Fr> for AggregationCircuit {
-        type Config = AggregationConfig;
+        type Config = PublicBaseConfig<Fr>;
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
@@ -439,89 +438,15 @@ mod aggregation {
         }
 
         fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            let range = RangeCircuitBuilder::configure(meta);
-            let instance = meta.instance_column();
-            meta.enable_equality(instance);
-            AggregationConfig { range, instance }
+            RangeWithInstanceCircuitBuilder::configure(meta)
         }
 
         fn synthesize(
             &self,
             config: Self::Config,
-            mut layouter: impl Layouter<Fr>,
+            layouter: impl Layouter<Fr>,
         ) -> Result<(), plonk::Error> {
-            // copied from RangeCircuitBuilder::synthesize but with extra logic to expose public instances
-            let range = config.range;
-            let circuit = &self.circuit.0;
-            range.load_lookup_table(&mut layouter).expect("load lookup table should not fail");
-
-            // we later `take` the builder, so we need to save this value
-            let witness_gen_only = circuit.builder.borrow().witness_gen_only();
-            let mut assigned_advices = HashMap::new();
-
-            let mut first_pass = SKIP_FIRST_PASS;
-            layouter
-                .assign_region(
-                    || "AggregationCircuit",
-                    |mut region| {
-                        if first_pass {
-                            first_pass = false;
-                            return Ok(());
-                        }
-                        // only support FirstPhase in this Builder because getting challenge value requires more specialized witness generation during synthesize
-                        if !witness_gen_only {
-                            // clone the builder so we can re-use the circuit for both vk and pk gen
-                            let builder = circuit.builder.borrow();
-                            let assignments = builder.assign_all(
-                                &range.gate,
-                                &range.lookup_advice,
-                                &range.q_lookup,
-                                &mut region,
-                                Default::default(),
-                            );
-                            *circuit.break_points.borrow_mut() = assignments.break_points;
-                            assigned_advices = assignments.assigned_advices;
-                        } else {
-                            #[cfg(feature = "display")]
-                            let start0 = std::time::Instant::now();
-                            let builder = circuit.builder.take();
-                            let break_points = circuit.break_points.take();
-                            for (phase, (threads, break_points)) in builder
-                                .threads
-                                .into_iter()
-                                .zip(break_points.into_iter())
-                                .enumerate()
-                                .take(1)
-                            {
-                                assign_threads_in(
-                                    phase,
-                                    threads,
-                                    &range.gate,
-                                    &range.lookup_advice[phase],
-                                    &mut region,
-                                    break_points,
-                                );
-                            }
-                            #[cfg(feature = "display")]
-                            println!("assign threads in {:?}", start0.elapsed());
-                        }
-                        Ok(())
-                    },
-                )
-                .unwrap();
-
-            if !witness_gen_only {
-                // expose public instances
-                let mut layouter = layouter.namespace(|| "expose");
-                for (i, instance) in self.assigned_instances.iter().enumerate() {
-                    let cell = instance.cell.unwrap();
-                    let (cell, _) = assigned_advices
-                        .get(&(cell.context_id, cell.offset))
-                        .expect("instance not assigned");
-                    layouter.constrain_instance(*cell, config.instance, i);
-                }
-            }
-            Ok(())
+            self.inner.synthesize(config, layouter)
         }
     }
 }
@@ -649,6 +574,7 @@ fn main() {
         File::open(path).unwrap_or_else(|e| panic!("{path} does not exist: {e:?}")),
     )
     .unwrap();
+    set_lookup_bits(agg_config.lookup_bits);
     let agg_circuit = AggregationCircuit::new(
         CircuitBuilderStage::Mock,
         None,
@@ -657,7 +583,6 @@ fn main() {
         snarks.clone(),
     );
     agg_circuit.config(agg_config.degree, Some(6));
-    set_var("LOOKUP_BITS", agg_config.lookup_bits.to_string());
     #[cfg(debug_assertions)]
     {
         MockProver::run(agg_config.degree, &agg_circuit, agg_circuit.instances())
