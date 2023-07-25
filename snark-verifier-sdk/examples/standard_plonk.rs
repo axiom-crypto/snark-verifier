@@ -17,6 +17,8 @@ use snark_verifier_sdk::{
     Snark,
 };
 use snark_verifier_sdk::{CircuitExt, SHPLONK};
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 mod application {
@@ -149,11 +151,30 @@ fn gen_application_snark(params: &ParamsKZG<Bn256>, flag: ComputeFlag) -> Snark 
     gen_snark_shplonk(params, &pk, circuit, None::<&str>)
 }
 
+fn gen_agg_break_points(agg_circuit: AggregationCircuit, path: &Path) -> Vec<Vec<usize>> {
+        let file = File::open(path);
+        let break_points = match file {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let break_points: Vec<Vec<usize>> = serde_json::from_reader(reader).unwrap();
+                break_points
+            }
+            Err(_) => {
+                let break_points = agg_circuit.break_points();
+                let file = File::create(path).unwrap();
+                let writer = BufWriter::new(file);
+                serde_json::to_writer(writer, &break_points).unwrap();
+                break_points
+            },
+        };
+        break_points
+}
+
 fn main() {
     let params_app = gen_srs(8);
     let dummy_snark = gen_application_snark(&params_app, ComputeFlag::All);
 
-    let k = 22u32;
+    let k = 14u32;
     let params = gen_srs(k);
     let lookup_bits = k as usize - 1;
     BASE_CONFIG_PARAMS.with(|config| {
@@ -173,7 +194,7 @@ fn main() {
     let start0 = start_timer!(|| "gen vk & pk");
     let pk = gen_pk(&params, &agg_circuit, Some(Path::new("./examples/agg.pk")));
     end_timer!(start0);
-    let break_points = agg_circuit.break_points();
+    let break_points = gen_agg_break_points(agg_circuit, Path::new("./examples/break_points.json"));
 
     let snarks = [ComputeFlag::All, ComputeFlag::SkipFixed, ComputeFlag::SkipCopy]
         .map(|flag| gen_application_snark(&params_app, flag));
