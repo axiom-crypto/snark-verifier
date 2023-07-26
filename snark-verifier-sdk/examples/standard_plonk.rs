@@ -1,22 +1,20 @@
 use application::ComputeFlag;
 use ark_std::{end_timer, start_timer};
-use halo2_base::gates::builder::{set_lookup_bits, CircuitBuilderStage, BASE_CONFIG_PARAMS};
+use halo2_base::gates::builder::{CircuitBuilderStage, BASE_CONFIG_PARAMS};
 use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::arithmetic::Field;
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
-use halo2_base::halo2_proofs::poly::commitment::Params;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
-use halo2_proofs::plonk::Circuit;
+
 use halo2_proofs::{halo2curves::bn256::Bn256, poly::kzg::commitment::ParamsKZG};
 use rand::rngs::OsRng;
+use snark_verifier_sdk::SHPLONK;
 use snark_verifier_sdk::{
-    evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk},
     gen_pk,
     halo2::{aggregation::AggregationCircuit, gen_snark_shplonk},
     Snark,
 };
-use snark_verifier_sdk::{CircuitExt, SHPLONK};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
@@ -28,7 +26,7 @@ mod application {
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance},
         poly::Rotation,
     };
-    use rand::RngCore;
+
     use snark_verifier_sdk::CircuitExt;
 
     #[derive(Clone, Copy)]
@@ -152,22 +150,22 @@ fn gen_application_snark(params: &ParamsKZG<Bn256>, flag: ComputeFlag) -> Snark 
 }
 
 fn gen_agg_break_points(agg_circuit: AggregationCircuit, path: &Path) -> Vec<Vec<usize>> {
-        let file = File::open(path);
-        let break_points = match file {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                let break_points: Vec<Vec<usize>> = serde_json::from_reader(reader).unwrap();
-                break_points
-            }
-            Err(_) => {
-                let break_points = agg_circuit.break_points();
-                let file = File::create(path).unwrap();
-                let writer = BufWriter::new(file);
-                serde_json::to_writer(writer, &break_points).unwrap();
-                break_points
-            },
-        };
-        break_points
+    let file = File::open(path);
+    let break_points = match file {
+        Ok(file) => {
+            let reader = BufReader::new(file);
+            let break_points: Vec<Vec<usize>> = serde_json::from_reader(reader).unwrap();
+            break_points
+        }
+        Err(_) => {
+            let break_points = agg_circuit.break_points();
+            let file = File::create(path).unwrap();
+            let writer = BufWriter::new(file);
+            serde_json::to_writer(writer, &break_points).unwrap();
+            break_points
+        }
+    };
+    break_points
 }
 
 fn main() {

@@ -300,7 +300,7 @@ impl AggregationCircuit {
         let ecc_chip = BaseFieldEccChip::new(&fp_chip);
         let loader = Halo2Loader::new(ecc_chip, builder);
 
-        let SnarkAggregationWitness { previous_instances, accumulator, preprocessed_digest } =
+        let SnarkAggregationWitness { previous_instances, accumulator, preprocessed_digest: _ } =
             aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), preprocessed_as_witness);
         let lhs = accumulator.lhs.assigned();
         let rhs = accumulator.rhs.assigned();

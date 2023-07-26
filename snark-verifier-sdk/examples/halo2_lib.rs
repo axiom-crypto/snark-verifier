@@ -1,49 +1,42 @@
 use ark_std::{end_timer, start_timer};
-use halo2_base::gates::builder::{set_lookup_bits, CircuitBuilderStage, BASE_CONFIG_PARAMS};
-use halo2_base::halo2_proofs;
-use halo2_base::halo2_proofs::arithmetic::Field;
-use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
-use halo2_base::halo2_proofs::poly::commitment::Params;
+use halo2_base::gates::builder::{CircuitBuilderStage, BASE_CONFIG_PARAMS};
 use halo2_base::utils::fs::gen_srs;
-use halo2_proofs::halo2curves as halo2_curves;
-use halo2_proofs::plonk::Circuit;
-use halo2_proofs::{halo2curves::bn256::Bn256, poly::kzg::commitment::ParamsKZG};
-use rand::rngs::OsRng;
+
 use snark_verifier_sdk::halo2::read_snark;
+use snark_verifier_sdk::SHPLONK;
 use snark_verifier_sdk::{
-    evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk},
     gen_pk,
     halo2::{aggregation::AggregationCircuit, gen_snark_shplonk},
     Snark,
 };
-use snark_verifier_sdk::{CircuitExt, SHPLONK};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 fn read_snark_from_file(file_name: &str) -> Snark {
     let snark_path = Path::new(file_name);
-    let snark = read_snark(snark_path).unwrap_or_else(|e| panic!("Snark not found at {snark_path:?}. {e:?}"));
+    let snark = read_snark(snark_path)
+        .unwrap_or_else(|e| panic!("Snark not found at {snark_path:?}. {e:?}"));
     snark
 }
 
 fn gen_agg_break_points(agg_circuit: AggregationCircuit, path: &Path) -> Vec<Vec<usize>> {
-        let file = File::open(path);
-        let break_points = match file {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                let break_points: Vec<Vec<usize>> = serde_json::from_reader(reader).unwrap();
-                break_points
-            }
-            Err(_) => {
-                let break_points = agg_circuit.break_points();
-                let file = File::create(path).unwrap();
-                let writer = BufWriter::new(file);
-                serde_json::to_writer(writer, &break_points).unwrap();
-                break_points
-            },
-        };
-        break_points
+    let file = File::open(path);
+    let break_points = match file {
+        Ok(file) => {
+            let reader = BufReader::new(file);
+            let break_points: Vec<Vec<usize>> = serde_json::from_reader(reader).unwrap();
+            break_points
+        }
+        Err(_) => {
+            let break_points = agg_circuit.break_points();
+            let file = File::create(path).unwrap();
+            let writer = BufWriter::new(file);
+            serde_json::to_writer(writer, &break_points).unwrap();
+            break_points
+        }
+    };
+    break_points
 }
 
 fn main() {
@@ -71,8 +64,12 @@ fn main() {
     end_timer!(start0);
     let break_points = gen_agg_break_points(agg_circuit, Path::new("./examples/break_points.json"));
 
-    let snarks = ["./examples/halo2_lib_snarks/range.snark", "./examples/halo2_lib_snarks/halo2_lib.snark", "./examples/halo2_lib_snarks/poseidon.snark"]
-        .map(|file| read_snark_from_file(file));
+    let snarks = [
+        "./examples/halo2_lib_snarks/range.snark",
+        "./examples/halo2_lib_snarks/halo2_lib.snark",
+        "./examples/halo2_lib_snarks/poseidon.snark",
+    ]
+    .map(|file| read_snark_from_file(file));
     // let snarks = [dummy_snark];
     for (i, snark) in snarks.into_iter().enumerate() {
         let agg_circuit = AggregationCircuit::new::<SHPLONK>(
