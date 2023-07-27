@@ -69,3 +69,8 @@ harness = false
 name = "zkevm_plus_state"
 required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
 harness = false
+
+[[bench]]
+name = "read_pk"
+required-features = ["loader_halo2"]
+harness = false
