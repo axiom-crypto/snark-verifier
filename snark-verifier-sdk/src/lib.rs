@@ -33,6 +33,8 @@ pub mod halo2;
 pub const LIMBS: usize = 3;
 pub const BITS: usize = 88;
 
+const BUFFER_SIZE: usize = 1024 * 1024; // 1MB
+
 /// AS stands for accumulation scheme.
 /// AS can be either `Kzg<Bn256, Gwc19>` (the original PLONK KZG multi-open) or `Kzg<Bn256, Bdfg21>` (SHPLONK)
 pub type PlonkVerifier<AS> = verifier::plonk::PlonkVerifier<AS, LimbsEncoding<LIMBS, BITS>>;
@@ -77,12 +79,19 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
 }
 
 pub fn read_pk<C: Circuit<Fr>>(path: &Path) -> io::Result<ProvingKey<G1Affine>> {
-    let f = File::open(path)?;
+    read_pk_with_capacity::<C>(BUFFER_SIZE, path)
+}
+
+pub fn read_pk_with_capacity<C: Circuit<Fr>>(
+    capacity: usize,
+    path: impl AsRef<Path>,
+) -> io::Result<ProvingKey<G1Affine>> {
+    let f = File::open(path.as_ref())?;
     #[cfg(feature = "display")]
-    let read_time = start_timer!(|| format!("Reading pkey from {path:?}"));
+    let read_time = start_timer!(|| format!("Reading pkey from {:?}", path.as_ref()));
 
     // BufReader is indeed MUCH faster than Read
-    let mut bufreader = BufReader::new(f);
+    let mut bufreader = BufReader::with_capacity(capacity, f);
     // But it's even faster to load the whole file into memory first and then process,
     // HOWEVER this requires twice as much memory to initialize
     // let initial_buffer_size = f.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
@@ -121,7 +130,7 @@ pub fn gen_pk<C: Circuit<Fr>>(
         let write_time = start_timer!(|| format!("Writing pkey to {path:?}"));
 
         path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
-        let mut f = BufWriter::new(File::create(path).unwrap());
+        let mut f = BufWriter::with_capacity(BUFFER_SIZE, File::create(path).unwrap());
         pk.write(&mut f, SerdeFormat::RawBytesUnchecked).unwrap();
 
         #[cfg(feature = "display")]
