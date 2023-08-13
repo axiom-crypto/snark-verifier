@@ -134,6 +134,7 @@ mod halo2_lib {
         loader::halo2::{EccInstructions, IntegerInstructions},
         util::arithmetic::CurveAffine,
     };
+    use halo2_base::halo2_proofs::halo2curves::group::ff::PrimeField as _;
     use halo2_base::{
         self,
         gates::{builder::GateThreadBuilder, GateChip, GateInstructions, RangeInstructions},
