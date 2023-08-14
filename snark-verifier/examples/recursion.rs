@@ -3,7 +3,7 @@
 use ark_std::{end_timer, start_timer};
 use common::*;
 use halo2_base::gates::builder::BaseConfigParams;
-use halo2_base::gates::{builder::BASE_CONFIG_PARAMS, flex_gate::GateStrategy};
+use halo2_base::gates::flex_gate::GateStrategy;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::{
@@ -12,11 +12,10 @@ use halo2_proofs::{
     halo2curves::{
         bn256::{Bn256, Fr, G1Affine},
         group::ff::Field,
-        FieldExt,
     },
     plonk::{
-        self, create_proof, keygen_pk, keygen_vk, Circuit, ConstraintSystem, Error, ProvingKey,
-        Selector, VerifyingKey,
+        create_proof, keygen_pk, keygen_vk, Circuit, ConstraintSystem, Error, ProvingKey, Selector,
+        VerifyingKey,
     },
     poly::{
         commitment::ParamsProver,
@@ -192,19 +191,38 @@ mod common {
     pub fn gen_dummy_snark<ConcreteCircuit: CircuitExt<Fr>>(
         params: &ParamsKZG<Bn256>,
         vk: Option<&VerifyingKey<G1Affine>>,
-    ) -> Snark {
-        struct CsProxy<F, C>(PhantomData<(F, C)>);
+        config_params: ConcreteCircuit::Params,
+    ) -> Snark
+    where
+        ConcreteCircuit::Params: Clone,
+    {
+        struct CsProxy<F: Field, C: Circuit<F>>(C::Params, PhantomData<(F, C)>);
 
-        impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C> {
+        impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C>
+        where
+            C::Params: Clone,
+        {
             type Config = C::Config;
             type FloorPlanner = C::FloorPlanner;
+            type Params = C::Params;
 
-            fn without_witnesses(&self) -> Self {
-                CsProxy(PhantomData)
+            fn params(&self) -> Self::Params {
+                self.0.clone()
             }
 
-            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                C::configure(meta)
+            fn without_witnesses(&self) -> Self {
+                CsProxy(self.0.clone(), PhantomData)
+            }
+
+            fn configure_with_params(
+                meta: &mut ConstraintSystem<F>,
+                params: Self::Params,
+            ) -> Self::Config {
+                C::configure_with_params(meta, params)
+            }
+
+            fn configure(_: &mut ConstraintSystem<F>) -> Self::Config {
+                unreachable!()
             }
 
             fn synthesize(
@@ -227,9 +245,9 @@ mod common {
             }
         }
 
-        let dummy_vk = vk
-            .is_none()
-            .then(|| keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>(PhantomData)).unwrap());
+        let dummy_vk = vk.is_none().then(|| {
+            keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>(config_params, PhantomData)).unwrap()
+        });
         let protocol = compile(
             params,
             vk.or(dummy_vk.as_ref()).unwrap(),
@@ -326,10 +344,7 @@ mod application {
 mod recursion {
     use halo2_base::{
         gates::{
-            builder::{
-                GateThreadBuilder, PublicBaseConfig, RangeWithInstanceCircuitBuilder,
-                BASE_CONFIG_PARAMS,
-            },
+            builder::{GateThreadBuilder, PublicBaseConfig, RangeWithInstanceCircuitBuilder},
             GateInstructions, RangeChip, RangeInstructions,
         },
         AssignedValue,
@@ -456,6 +471,7 @@ mod recursion {
         round: usize,
         instances: Vec<Fr>,
         as_proof: Vec<u8>,
+        lookup_bits: usize,
 
         inner: RangeWithInstanceCircuitBuilder<Fr>,
     }
@@ -473,6 +489,7 @@ mod recursion {
             initial_state: Fr,
             state: Fr,
             round: usize,
+            config_params: BaseConfigParams,
         ) -> Self {
             let svk = params.get_g()[0].into();
             let default_accumulator = KzgAccumulator::new(params.get_g()[1], params.get_g()[0]);
@@ -528,17 +545,25 @@ mod recursion {
                     .collect();
 
             let builder = GateThreadBuilder::mock();
-            let inner = RangeWithInstanceCircuitBuilder::mock(builder, vec![]);
-            let mut circuit =
-                Self { svk, default_accumulator, app, previous, round, instances, as_proof, inner };
+            let lookup_bits = config_params.lookup_bits.unwrap();
+            let inner = RangeWithInstanceCircuitBuilder::mock(builder, config_params, vec![]);
+            let mut circuit = Self {
+                svk,
+                default_accumulator,
+                app,
+                previous,
+                round,
+                instances,
+                as_proof,
+                inner,
+                lookup_bits,
+            };
             circuit.build();
             circuit
         }
 
         fn build(&mut self) {
-            let lookup_bits =
-                BASE_CONFIG_PARAMS.with(|params| params.borrow().lookup_bits.unwrap());
-            let range = RangeChip::<Fr>::default(lookup_bits);
+            let range = RangeChip::<Fr>::default(self.lookup_bits);
             let main_gate = range.gate();
             let mut builder = GateThreadBuilder::mock();
             let ctx = &mut builder;
@@ -626,8 +651,12 @@ mod recursion {
             );
         }
 
-        fn initial_snark(params: &ParamsKZG<Bn256>, vk: Option<&VerifyingKey<G1Affine>>) -> Snark {
-            let mut snark = gen_dummy_snark::<RecursionCircuit>(params, vk);
+        fn initial_snark(
+            params: &ParamsKZG<Bn256>,
+            vk: Option<&VerifyingKey<G1Affine>>,
+            config_params: BaseConfigParams,
+        ) -> Snark {
+            let mut snark = gen_dummy_snark::<RecursionCircuit>(params, vk, config_params);
             let g = params.get_g();
             snark.instances = vec![[g[1].x, g[1].y, g[0].x, g[0].y]
                 .into_iter()
@@ -658,13 +687,25 @@ mod recursion {
     impl Circuit<Fr> for RecursionCircuit {
         type Config = PublicBaseConfig<Fr>;
         type FloorPlanner = SimpleFloorPlanner;
+        type Params = BaseConfigParams;
+
+        fn params(&self) -> Self::Params {
+            self.inner.circuit.params()
+        }
 
         fn without_witnesses(&self) -> Self {
             unimplemented!()
         }
 
-        fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            RangeWithInstanceCircuitBuilder::configure(meta)
+        fn configure_with_params(
+            meta: &mut ConstraintSystem<Fr>,
+            params: Self::Params,
+        ) -> Self::Config {
+            RangeWithInstanceCircuitBuilder::configure_with_params(meta, params)
+        }
+
+        fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
+            unreachable!()
         }
 
         fn synthesize(
@@ -699,14 +740,20 @@ mod recursion {
         recursion_params: &ParamsKZG<Bn256>,
         app_params: &ParamsKZG<Bn256>,
         app_vk: &VerifyingKey<G1Affine>,
-    ) -> ProvingKey<G1Affine> {
+        recursion_config: BaseConfigParams,
+        app_config: ConcreteCircuit::Params,
+    ) -> ProvingKey<G1Affine>
+    where
+        ConcreteCircuit::Params: Clone,
+    {
         let recursion = RecursionCircuit::new(
             recursion_params,
-            gen_dummy_snark::<ConcreteCircuit>(app_params, Some(app_vk)),
-            RecursionCircuit::initial_snark(recursion_params, None),
+            gen_dummy_snark::<ConcreteCircuit>(app_params, Some(app_vk), app_config),
+            RecursionCircuit::initial_snark(recursion_params, None, recursion_config.clone()),
             Fr::zero(),
             Fr::zero(),
             0,
+            recursion_config,
         );
         // we cannot auto-configure the circuit because dummy_snark must know the configuration beforehand
         // uncomment the following line only in development to test and print out the optimal configuration ahead of time
@@ -721,11 +768,15 @@ mod recursion {
         recursion_pk: &ProvingKey<G1Affine>,
         initial_state: Fr,
         inputs: Vec<ConcreteCircuit::Input>,
+        config_params: BaseConfigParams,
     ) -> (Fr, Snark) {
         let mut state = initial_state;
         let mut app = ConcreteCircuit::new(state);
-        let mut previous =
-            RecursionCircuit::initial_snark(recursion_params, Some(recursion_pk.get_vk()));
+        let mut previous = RecursionCircuit::initial_snark(
+            recursion_params,
+            Some(recursion_pk.get_vk()),
+            config_params.clone(),
+        );
         for (round, input) in inputs.into_iter().enumerate() {
             state = app.state_transition(input);
             println!("Generate app snark");
@@ -737,6 +788,7 @@ mod recursion {
                 initial_state,
                 state,
                 round,
+                config_params.clone(),
             );
             println!("Generate recursion snark");
             previous = gen_snark(recursion_params, recursion_pk, recursion);
@@ -752,16 +804,14 @@ fn main() {
         serde_json::from_reader(fs::File::open("configs/example_recursion.json").unwrap()).unwrap();
     let k = recursion_config.degree;
     let recursion_params = gen_srs(k);
-    BASE_CONFIG_PARAMS.with(|params| {
-        *params.borrow_mut() = BaseConfigParams {
-            strategy: GateStrategy::Vertical,
-            k: k as usize,
-            num_advice_per_phase: vec![recursion_config.num_advice],
-            num_lookup_advice_per_phase: vec![recursion_config.num_lookup_advice],
-            num_fixed: recursion_config.num_fixed,
-            lookup_bits: Some(recursion_config.lookup_bits),
-        }
-    });
+    let config_params = BaseConfigParams {
+        strategy: GateStrategy::Vertical,
+        k: k as usize,
+        num_advice_per_phase: vec![recursion_config.num_advice],
+        num_lookup_advice_per_phase: vec![recursion_config.num_lookup_advice],
+        num_fixed: recursion_config.num_fixed,
+        lookup_bits: Some(recursion_config.lookup_bits),
+    };
 
     let app_pk = gen_pk(&app_params, &application::Square::default());
 
@@ -770,6 +820,8 @@ fn main() {
         &recursion_params,
         &app_params,
         app_pk.get_vk(),
+        config_params.clone(),
+        (),
     );
     end_timer!(pk_time);
 
@@ -782,9 +834,10 @@ fn main() {
         &recursion_pk,
         Fr::from(2u64),
         vec![(); num_round],
+        config_params.clone(),
     );
     end_timer!(pf_time);
-    assert_eq!(final_state, Fr::from(2u64).pow(&[1 << num_round, 0, 0, 0]));
+    assert_eq!(final_state, Fr::from(2u64).pow([1 << num_round]));
 
     {
         let dk =

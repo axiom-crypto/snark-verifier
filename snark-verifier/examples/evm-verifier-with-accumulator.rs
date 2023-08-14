@@ -1,6 +1,6 @@
 use aggregation::{AggregationCircuit, AggregationConfigParams};
 use halo2_base::{
-    gates::builder::{set_lookup_bits, CircuitBuilderStage},
+    gates::builder::{BaseConfigParams, CircuitBuilderStage},
     halo2_proofs,
     utils::fs::gen_srs,
 };
@@ -300,7 +300,7 @@ mod aggregation {
         As::verify(&Default::default(), &accumulators, &proof).unwrap()
     }
 
-    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(serde::Serialize, serde::Deserialize, Default)]
     pub struct AggregationConfigParams {
         pub degree: u32,
         pub num_advice: usize,
@@ -318,8 +318,8 @@ mod aggregation {
     impl AggregationCircuit {
         pub fn new(
             stage: CircuitBuilderStage,
+            config_params: BaseConfigParams,
             break_points: Option<MultiPhaseThreadBreakPoints>,
-            lookup_bits: usize,
             params_g0: G1Affine,
             snarks: impl IntoIterator<Item = Snark>,
         ) -> Self {
@@ -355,13 +355,9 @@ mod aggregation {
             };
 
             // create thread builder and run aggregation witness gen
-            let builder = match stage {
-                CircuitBuilderStage::Mock => GateThreadBuilder::mock(),
-                CircuitBuilderStage::Prover => GateThreadBuilder::prover(),
-                CircuitBuilderStage::Keygen => GateThreadBuilder::keygen(),
-            };
+            let builder = GateThreadBuilder::from_stage(stage);
             // create halo2loader
-            let range = RangeChip::<Fr>::default(lookup_bits);
+            let range = RangeChip::<Fr>::default(config_params.lookup_bits.unwrap());
             let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
             let ecc_chip = BaseFieldEccChip::new(&fp_chip);
             let loader = Halo2Loader::new(ecc_chip, builder);
@@ -391,24 +387,25 @@ mod aggregation {
             }
 
             let builder = loader.take_ctx();
-            let inner = match stage {
-                CircuitBuilderStage::Mock => {
-                    RangeWithInstanceCircuitBuilder::mock(builder, assigned_instances)
-                }
-                CircuitBuilderStage::Keygen => {
-                    RangeWithInstanceCircuitBuilder::keygen(builder, assigned_instances)
-                }
-                CircuitBuilderStage::Prover => RangeWithInstanceCircuitBuilder::prover(
-                    builder,
-                    assigned_instances,
-                    break_points.unwrap(),
-                ),
-            };
+            let inner = RangeWithInstanceCircuitBuilder::from_stage(
+                stage,
+                builder,
+                config_params,
+                break_points,
+                assigned_instances,
+            );
             Self { inner, as_proof }
         }
 
-        pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> BaseConfigParams {
-            self.inner.circuit.0.builder.borrow().config(k as usize, minimum_rows)
+        pub fn config(
+            &self,
+            k: u32,
+            minimum_rows: Option<usize>,
+            lookup_bits: usize,
+        ) -> BaseConfigParams {
+            let mut params = self.inner.circuit.0.builder.borrow().config(k as usize, minimum_rows);
+            params.lookup_bits = Some(lookup_bits);
+            params
         }
 
         pub fn break_points(&self) -> MultiPhaseThreadBreakPoints {
@@ -432,13 +429,25 @@ mod aggregation {
     impl Circuit<Fr> for AggregationCircuit {
         type Config = PublicBaseConfig<Fr>;
         type FloorPlanner = SimpleFloorPlanner;
+        type Params = BaseConfigParams;
+
+        fn params(&self) -> Self::Params {
+            self.inner.circuit.params()
+        }
+
+        fn configure_with_params(
+            meta: &mut plonk::ConstraintSystem<Fr>,
+            params: Self::Params,
+        ) -> Self::Config {
+            RangeWithInstanceCircuitBuilder::configure_with_params(meta, params)
+        }
 
         fn without_witnesses(&self) -> Self {
             unimplemented!()
         }
 
-        fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            RangeWithInstanceCircuitBuilder::configure(meta)
+        fn configure(_: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
+            unimplemented!()
         }
 
         fn synthesize(
@@ -574,15 +583,23 @@ fn main() {
         File::open(path).unwrap_or_else(|e| panic!("{path} does not exist: {e:?}")),
     )
     .unwrap();
-    set_lookup_bits(agg_config.lookup_bits);
-    let agg_circuit = AggregationCircuit::new(
+    let mut config_params = BaseConfigParams {
+        k: agg_config.degree as usize,
+        strategy: Default::default(),
+        num_advice_per_phase: vec![agg_config.num_advice],
+        num_lookup_advice_per_phase: vec![agg_config.num_lookup_advice],
+        num_fixed: agg_config.num_fixed,
+        lookup_bits: Some(agg_config.lookup_bits),
+    };
+    let mut agg_circuit = AggregationCircuit::new(
         CircuitBuilderStage::Mock,
+        config_params,
         None,
-        agg_config.lookup_bits,
         params_app.get_g()[0],
         snarks.clone(),
     );
-    agg_circuit.config(agg_config.degree, Some(6));
+    config_params = agg_circuit.config(agg_config.degree, Some(6), agg_config.lookup_bits);
+    agg_circuit.inner.circuit.0.config_params = config_params.clone();
     #[cfg(debug_assertions)]
     {
         MockProver::run(agg_config.degree, &agg_circuit, agg_circuit.instances())
@@ -605,8 +622,8 @@ fn main() {
 
     let agg_circuit = AggregationCircuit::new(
         CircuitBuilderStage::Prover,
+        config_params,
         Some(break_points),
-        agg_config.lookup_bits,
         params_app.get_g()[0],
         snarks,
     );
