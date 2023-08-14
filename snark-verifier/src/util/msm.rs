@@ -71,7 +71,7 @@ where
         let gen = gen.map(|gen| self.bases.first().unwrap().loader().ec_point_load_const(&gen));
         let pairs = iter::empty()
             .chain(self.constant.as_ref().map(|constant| (constant, gen.as_ref().unwrap())))
-            .chain(self.scalars.iter().zip(self.bases.into_iter()))
+            .chain(self.scalars.iter().zip(self.bases))
             .collect_vec();
         L::multi_scalar_multiplication(&pairs)
     }

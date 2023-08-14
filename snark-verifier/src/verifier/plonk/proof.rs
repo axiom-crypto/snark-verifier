@@ -158,7 +158,7 @@ where
             .queries
             .iter()
             .map(|query| {
-                let shift = protocol.domain.rotate_scalar(C::Scalar::one(), query.rotation);
+                let shift = protocol.domain.rotate_scalar(C::Scalar::ONE, query.rotation);
                 pcs::Query::new(query.poly, shift)
             })
             .collect()

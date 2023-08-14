@@ -23,6 +23,7 @@ pub struct Gwc19;
 impl<M, L> PolynomialCommitmentScheme<M::G1Affine, L> for KzgAs<M, Gwc19>
 where
     M: MultiMillerLoop,
+    M::G1Affine: CurveAffine<ScalarExt = M::Fr, CurveExt = M::G1>,
     L: Loader<M::G1Affine>,
 {
     type VerifyingKey = KzgSuccinctVerifyingKey<M::G1Affine>;
@@ -31,7 +32,7 @@ where
 
     fn read_proof<T>(
         _: &Self::VerifyingKey,
-        queries: &[Query<M::Scalar>],
+        queries: &[Query<M::Fr>],
         transcript: &mut T,
     ) -> Result<Self::Proof, Error>
     where
@@ -44,15 +45,13 @@ where
         svk: &Self::VerifyingKey,
         commitments: &[Msm<M::G1Affine, L>],
         z: &L::LoadedScalar,
-        queries: &[Query<M::Scalar, L::LoadedScalar>],
+        queries: &[Query<M::Fr, L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<Self::Output, Error> {
         let sets = query_sets(queries);
         let powers_of_u = &proof.u.powers(sets.len());
         let f = {
-            let powers_of_v = proof
-                .v
-                .powers(sets.iter().map(|set| set.polys.len()).max().unwrap());
+            let powers_of_v = proof.v.powers(sets.iter().map(|set| set.polys.len()).max().unwrap());
             sets.iter()
                 .map(|set| set.msm(commitments, &powers_of_v))
                 .zip(powers_of_u.iter())
@@ -67,11 +66,7 @@ where
             .zip(powers_of_u.iter())
             .map(|(w, power_of_u)| Msm::base(w) * power_of_u)
             .collect_vec();
-        let lhs = f + rhs
-            .iter()
-            .zip(z_omegas)
-            .map(|(uw, z_omega)| uw.clone() * &z_omega)
-            .sum();
+        let lhs = f + rhs.iter().zip(z_omegas).map(|(uw, z_omega)| uw.clone() * &z_omega).sum();
 
         Ok(KzgAccumulator::new(
             lhs.evaluate(Some(svk.g)),
@@ -161,14 +156,10 @@ impl<M> CostEstimation<M::G1Affine> for KzgAs<M, Gwc19>
 where
     M: MultiMillerLoop,
 {
-    type Input = Vec<Query<M::Scalar>>;
+    type Input = Vec<Query<M::Fr>>;
 
-    fn estimate_cost(queries: &Vec<Query<M::Scalar>>) -> Cost {
+    fn estimate_cost(queries: &Vec<Query<M::Fr>>) -> Cost {
         let num_w = query_sets(queries).len();
-        Cost {
-            num_commitment: num_w,
-            num_msm: num_w,
-            ..Default::default()
-        }
+        Cost { num_commitment: num_w, num_msm: num_w, ..Default::default() }
     }
 }

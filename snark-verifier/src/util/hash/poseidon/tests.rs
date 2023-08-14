@@ -47,7 +47,7 @@ fn test_poseidon_against_test_vectors() {
         hasher.state = State::new(state.try_into().unwrap());
         hasher.permutation(&[(); RATE].map(|_| Fr::zero())); // avoid padding
         let state_0 = hasher.state.inner;
-        let expected = vec![
+        let expected = [
             "7853200120776062878684798364095072458815029376092732009249414926327459813530",
             "7142104613055408817911962100316808866448378443474503659992478482890339429929",
             "6549537674122432311777789598043107870002137484850126429160507761192163713804",
@@ -71,7 +71,7 @@ fn test_poseidon_against_test_vectors() {
         hasher.state = State::new(state.try_into().unwrap());
         hasher.permutation(&[(); RATE].map(|_| Fr::zero()));
         let state_0 = hasher.state.inner;
-        let expected = vec![
+        let expected = [
             "18821383157269793795438455681495246036402687001665670618754263018637548127333",
             "7817711165059374331357136443537800893307845083525445872661165200086166013245",
             "16733335996448830230979566039396561240864200624113062088822991822580465420551",
