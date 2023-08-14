@@ -78,13 +78,14 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
     }
 }
 
-pub fn read_pk<C: Circuit<Fr>>(path: &Path) -> io::Result<ProvingKey<G1Affine>> {
-    read_pk_with_capacity::<C>(BUFFER_SIZE, path)
+pub fn read_pk<C: Circuit<Fr>>(path: &Path, params: C::Params) -> io::Result<ProvingKey<G1Affine>> {
+    read_pk_with_capacity::<C>(BUFFER_SIZE, path, params)
 }
 
 pub fn read_pk_with_capacity<C: Circuit<Fr>>(
     capacity: usize,
     path: impl AsRef<Path>,
+    params: C::Params,
 ) -> io::Result<ProvingKey<G1Affine>> {
     let f = File::open(path.as_ref())?;
     #[cfg(feature = "display")]
@@ -97,7 +98,8 @@ pub fn read_pk_with_capacity<C: Circuit<Fr>>(
     // let initial_buffer_size = f.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
     // let mut bufreader = Vec::with_capacity(initial_buffer_size);
     // f.read_to_end(&mut bufreader)?;
-    let pk = ProvingKey::read::<_, C>(&mut bufreader, SerdeFormat::RawBytesUnchecked).unwrap();
+    let pk =
+        ProvingKey::read::<_, C>(&mut bufreader, SerdeFormat::RawBytesUnchecked, params).unwrap();
 
     #[cfg(feature = "display")]
     end_timer!(read_time);
@@ -112,7 +114,7 @@ pub fn gen_pk<C: Circuit<Fr>>(
     path: Option<&Path>,
 ) -> ProvingKey<G1Affine> {
     if let Some(path) = path {
-        if let Ok(pk) = read_pk::<C>(path) {
+        if let Ok(pk) = read_pk::<C>(path, circuit.params()) {
             return pk;
         }
     }

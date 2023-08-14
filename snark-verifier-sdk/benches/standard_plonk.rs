@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};
-use halo2_base::gates::builder::{CircuitBuilderStage, BASE_CONFIG_PARAMS};
+use halo2_base::gates::builder::CircuitBuilderStage;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
@@ -185,11 +185,15 @@ fn bench(c: &mut Criterion) {
 
     let snarks = [(); 3].map(|_| gen_application_snark(&params_app));
     let agg_config = AggregationConfigParams::from_path(path);
-    BASE_CONFIG_PARAMS.with(|params| *params.borrow_mut() = agg_config.into());
     let params = gen_srs(agg_config.degree);
-    let lookup_bits = params.k() as usize - 1;
 
-    let agg_circuit = AggregationCircuit::keygen::<SHPLONK>(&params, snarks.clone());
+    let agg_circuit = AggregationCircuit::new::<SHPLONK>(
+        CircuitBuilderStage::Keygen,
+        agg_config,
+        None,
+        &params,
+        snarks.clone(),
+    );
 
     let start0 = start_timer!(|| "gen vk & pk");
     let pk = gen_pk(&params, &agg_circuit, Some(Path::new("agg.pk")));
@@ -205,8 +209,8 @@ fn bench(c: &mut Criterion) {
             b.iter(|| {
                 let agg_circuit = AggregationCircuit::new::<SHPLONK>(
                     CircuitBuilderStage::Prover,
+                    agg_config,
                     Some(break_points.clone()),
-                    lookup_bits,
                     params,
                     snarks.clone(),
                 );
@@ -222,8 +226,8 @@ fn bench(c: &mut Criterion) {
         // do one more time to verify
         let agg_circuit = AggregationCircuit::new::<SHPLONK>(
             CircuitBuilderStage::Prover,
+            agg_config,
             Some(break_points),
-            lookup_bits,
             &params,
             snarks.clone(),
         );

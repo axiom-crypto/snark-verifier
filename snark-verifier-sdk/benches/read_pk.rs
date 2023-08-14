@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use halo2_base::gates::builder::BASE_CONFIG_PARAMS;
+use halo2_base::gates::builder::CircuitBuilderStage;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
@@ -182,30 +182,37 @@ fn bench(c: &mut Criterion) {
 
     let snarks = [(); 3].map(|_| gen_application_snark(&params_app));
     let agg_config = AggregationConfigParams::from_path(path);
-    BASE_CONFIG_PARAMS.with(|params| *params.borrow_mut() = agg_config.into());
     let params = gen_srs(agg_config.degree);
 
-    let agg_circuit = AggregationCircuit::keygen::<SHPLONK>(&params, snarks);
+    let agg_circuit = AggregationCircuit::new::<SHPLONK>(
+        CircuitBuilderStage::Keygen,
+        agg_config,
+        None,
+        &params,
+        snarks,
+    );
 
+    std::fs::remove_file("examples/agg.pk").ok();
     let start0 = start_timer!(|| "gen vk & pk");
     gen_pk(&params, &agg_circuit, Some(Path::new("examples/agg.pk")));
     end_timer!(start0);
 
     let mut group = c.benchmark_group("read-pk");
     group.sample_size(10);
-    group.bench_with_input("1mb", &(1024 * 1024), |b, &c| {
-        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk"))
+    group.bench_with_input("buffer 1mb capacity", &(1024 * 1024), |b, &c| {
+        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk", agg_config))
     });
-    group.bench_with_input("10mb", &(10 * 1024 * 1024), |b, &c| {
-        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk"))
+    group.bench_with_input("buffer 10mb capacity", &(10 * 1024 * 1024), |b, &c| {
+        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk", agg_config))
     });
-    group.bench_with_input("100mb", &(100 * 1024 * 1024), |b, &c| {
-        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk"))
+    group.bench_with_input("buffer 100mb capacity", &(100 * 1024 * 1024), |b, &c| {
+        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk", agg_config))
     });
-    group.bench_with_input("1gb", &(1024 * 1024 * 1024), |b, &c| {
-        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk"))
+    group.bench_with_input("buffer 1gb capacity", &(1024 * 1024 * 1024), |b, &c| {
+        b.iter(|| read_pk_with_capacity::<AggregationCircuit>(c, "examples/agg.pk", agg_config))
     });
     group.finish();
+    std::fs::remove_file("examples/agg.pk").unwrap();
 }
 
 criterion_group! {

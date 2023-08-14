@@ -4,8 +4,7 @@ use halo2_base::{
     gates::{
         builder::{
             BaseConfigParams, CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints,
-            PublicBaseConfig, RangeCircuitBuilder, RangeWithInstanceCircuitBuilder,
-            BASE_CONFIG_PARAMS,
+            PublicBaseConfig, RangeWithInstanceCircuitBuilder,
         },
         flex_gate::GateStrategy,
         RangeChip,
@@ -14,10 +13,7 @@ use halo2_base::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::bn256::{Bn256, Fr, G1Affine},
         plonk::{self, Circuit, ConstraintSystem, Selector},
-        poly::{
-            commitment::{Params, ParamsProver},
-            kzg::commitment::ParamsKZG,
-        },
+        poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
     },
     utils::ScalarField,
     AssignedValue,
@@ -139,7 +135,7 @@ where
 
 /// Same as `FlexGateConfigParams` except we assume a single Phase and default 'Vertical' strategy.
 /// Also adds `lookup_bits` field.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 pub struct AggregationConfigParams {
     pub degree: u32,
     pub num_advice: usize,
@@ -165,6 +161,29 @@ impl From<AggregationConfigParams> for BaseConfigParams {
             num_fixed: params.num_fixed,
             lookup_bits: Some(params.lookup_bits),
         }
+    }
+}
+
+impl TryFrom<&BaseConfigParams> for AggregationConfigParams {
+    type Error = &'static str;
+
+    fn try_from(params: &BaseConfigParams) -> Result<Self, Self::Error> {
+        if params.num_advice_per_phase.len() != 1 {
+            return Err("AggregationConfigParams only supports 1 phase");
+        }
+        if params.num_lookup_advice_per_phase.len() != 1 {
+            return Err("AggregationConfigParams only supports 1 phase");
+        }
+        if params.lookup_bits.is_none() {
+            return Err("AggregationConfigParams requires lookup_bits");
+        }
+        Ok(Self {
+            degree: params.k as u32,
+            num_advice: params.num_advice_per_phase[0],
+            num_lookup_advice: params.num_lookup_advice_per_phase[0],
+            num_fixed: params.num_fixed,
+            lookup_bits: params.lookup_bits.unwrap(),
+        })
     }
 }
 
@@ -211,8 +230,8 @@ impl AggregationCircuit {
     /// where `AS` can be either [`crate::SHPLONK`] or [`crate::GWC`] (for original PLONK multi-open scheme)
     pub fn new<AS>(
         stage: CircuitBuilderStage,
+        agg_config: AggregationConfigParams,
         break_points: Option<MultiPhaseThreadBreakPoints>,
-        lookup_bits: usize,
         params: &ParamsKZG<Bn256>,
         snarks: impl IntoIterator<Item = Snark>,
     ) -> Self
@@ -254,13 +273,9 @@ impl AggregationCircuit {
         };
 
         // create thread builder and run aggregation witness gen
-        let builder = match stage {
-            CircuitBuilderStage::Mock => GateThreadBuilder::mock(),
-            CircuitBuilderStage::Prover => GateThreadBuilder::prover(),
-            CircuitBuilderStage::Keygen => GateThreadBuilder::keygen(),
-        };
+        let builder = GateThreadBuilder::from_stage(stage);
         // create halo2loader
-        let range = RangeChip::<Fr>::default(lookup_bits);
+        let range = RangeChip::<Fr>::default(agg_config.lookup_bits);
         let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
         let ecc_chip = BaseFieldEccChip::new(&fp_chip);
         let loader = Halo2Loader::new(ecc_chip, builder);
@@ -290,21 +305,20 @@ impl AggregationCircuit {
         }
 
         let builder = loader.take_ctx();
-        let circuit = match stage {
-            CircuitBuilderStage::Mock => RangeCircuitBuilder::mock(builder),
-            CircuitBuilderStage::Keygen => RangeCircuitBuilder::keygen(builder),
-            CircuitBuilderStage::Prover => {
-                RangeCircuitBuilder::prover(builder, break_points.unwrap())
-            }
-        };
-        let inner = RangeWithInstanceCircuitBuilder::new(circuit, assigned_instances);
+        let inner = RangeWithInstanceCircuitBuilder::from_stage(
+            stage,
+            builder,
+            agg_config.into(),
+            break_points,
+            assigned_instances,
+        );
         Self { inner, previous_instances, as_proof }
     }
 
     pub fn public<AS>(
         stage: CircuitBuilderStage,
+        agg_config: AggregationConfigParams,
         break_points: Option<MultiPhaseThreadBreakPoints>,
-        lookup_bits: usize,
         params: &ParamsKZG<Bn256>,
         snarks: impl IntoIterator<Item = Snark>,
         has_prev_accumulator: bool,
@@ -312,45 +326,9 @@ impl AggregationCircuit {
     where
         AS: for<'a> Halo2KzgAccumulationScheme<'a>,
     {
-        let mut private = Self::new::<AS>(stage, break_points, lookup_bits, params, snarks);
+        let mut private = Self::new::<AS>(stage, agg_config, break_points, params, snarks);
         private.expose_previous_instances(has_prev_accumulator);
         private
-    }
-
-    // this function is for convenience
-    /// `params` should be the universal trusted setup to be used for the aggregation circuit, not the one used to generate the previous snarks, although we assume both use the same generator g[0]
-    pub fn keygen<AS>(params: &ParamsKZG<Bn256>, snarks: impl IntoIterator<Item = Snark>) -> Self
-    where
-        AS: for<'a> Halo2KzgAccumulationScheme<'a>,
-    {
-        let lookup_bits = BASE_CONFIG_PARAMS
-            .with(|conf| conf.borrow().lookup_bits)
-            .unwrap_or(params.k() as usize - 1);
-        let circuit =
-            Self::new::<AS>(CircuitBuilderStage::Keygen, None, lookup_bits, params, snarks);
-        circuit.config(params.k(), Some(10));
-        circuit
-    }
-
-    // this function is for convenience
-    pub fn prover<AS>(
-        params: &ParamsKZG<Bn256>,
-        snarks: impl IntoIterator<Item = Snark>,
-        break_points: MultiPhaseThreadBreakPoints,
-    ) -> Self
-    where
-        AS: for<'a> Halo2KzgAccumulationScheme<'a>,
-    {
-        let lookup_bits = BASE_CONFIG_PARAMS
-            .with(|conf| conf.borrow().lookup_bits)
-            .unwrap_or(params.k() as usize - 1);
-        Self::new::<AS>(
-            CircuitBuilderStage::Prover,
-            Some(break_points),
-            lookup_bits,
-            params,
-            snarks,
-        )
     }
 
     /// Re-expose the previous public instances of aggregated snarks again.
@@ -367,8 +345,12 @@ impl AggregationCircuit {
         &self.as_proof[..]
     }
 
-    pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> BaseConfigParams {
-        self.inner.config(k, minimum_rows)
+    /// Auto-configure the circuit and change the circuit's internal configuration parameters.
+    pub fn config(&mut self, k: u32, minimum_rows: Option<usize>) -> BaseConfigParams {
+        let mut new_config = self.inner.circuit.0.builder.borrow().config(k as usize, minimum_rows);
+        new_config.lookup_bits = self.inner.circuit.0.config_params.lookup_bits;
+        self.inner.circuit.0.config_params = new_config.clone();
+        new_config
     }
 
     pub fn break_points(&self) -> MultiPhaseThreadBreakPoints {
@@ -401,13 +383,25 @@ impl<F: ScalarField> CircuitExt<F> for RangeWithInstanceCircuitBuilder<F> {
 impl Circuit<Fr> for AggregationCircuit {
     type Config = PublicBaseConfig<Fr>;
     type FloorPlanner = SimpleFloorPlanner;
+    type Params = AggregationConfigParams;
+
+    fn params(&self) -> Self::Params {
+        (&self.inner.circuit.0.config_params).try_into().unwrap()
+    }
 
     fn without_witnesses(&self) -> Self {
         unimplemented!()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
-        RangeWithInstanceCircuitBuilder::configure(meta)
+    fn configure_with_params(
+        meta: &mut ConstraintSystem<Fr>,
+        params: Self::Params,
+    ) -> Self::Config {
+        RangeWithInstanceCircuitBuilder::configure_with_params(meta, params.into())
+    }
+
+    fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
+        unreachable!()
     }
 
     fn synthesize(
