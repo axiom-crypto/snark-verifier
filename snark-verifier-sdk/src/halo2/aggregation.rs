@@ -168,10 +168,10 @@ impl TryFrom<&BaseConfigParams> for AggregationConfigParams {
     type Error = &'static str;
 
     fn try_from(params: &BaseConfigParams) -> Result<Self, Self::Error> {
-        if params.num_advice_per_phase.iter().skip(1).filter(|&n| *n != 0).next().is_some() {
+        if params.num_advice_per_phase.iter().skip(1).any(|&n| n != 0) {
             return Err("AggregationConfigParams only supports 1 phase");
         }
-        if params.num_lookup_advice_per_phase.iter().skip(1).filter(|&n| *n != 0).next().is_some() {
+        if params.num_lookup_advice_per_phase.iter().skip(1).any(|&n| n != 0) {
             return Err("AggregationConfigParams only supports 1 phase");
         }
         if params.lookup_bits.is_none() {
@@ -187,6 +187,17 @@ impl TryFrom<&BaseConfigParams> for AggregationConfigParams {
     }
 }
 
+/// Holds virtual contexts for the cells used to verify a collection of snarks
+#[derive(Clone, Debug)]
+pub struct AggregationCtxBuilder {
+    /// Virtual region with virtual contexts (columns)
+    pub builder: GateThreadBuilder<Fr>,
+    /// The limbs of the pair of elliptic curve points that need to be verified in a final pairing check.
+    pub accumulator: Vec<AssignedValue<Fr>>,
+    // the public instances from previous snarks that were aggregated
+    pub previous_instances: Vec<Vec<AssignedValue<Fr>>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct AggregationCircuit {
     pub inner: RangeWithInstanceCircuitBuilder<Fr>,
@@ -194,7 +205,7 @@ pub struct AggregationCircuit {
     // the user can optionally append these to `inner.assigned_instances` to expose them
     pub previous_instances: Vec<Vec<AssignedValue<Fr>>>,
     // accumulation scheme proof, private input
-    pub as_proof: Vec<u8>, // not sure this needs to be stored, keeping for now
+    // pub as_proof: Vec<u8>,
 }
 
 // trait just so we can have a generic that is either SHPLONK or GWC
@@ -220,18 +231,16 @@ pub trait Halo2KzgAccumulationScheme<'a> = PolynomialCommitmentScheme<
         VerifyingKey = KzgAsVerifyingKey,
     > + AccumulationSchemeProver<G1Affine, ProvingKey = KzgAsProvingKey<G1Affine>>;
 
-impl AggregationCircuit {
-    /// Given snarks, this creates a circuit and runs the `GateThreadBuilder` to verify all the snarks.
-    /// By default, the returned circuit has public instances equal to the limbs of the pair of elliptic curve points, referred to as the `accumulator`, that need to be verified in a final pairing check.
+impl AggregationCtxBuilder {
+    /// Given snarks, this runs the `GateThreadBuilder` to verify all the snarks.
     ///
-    /// The user can optionally modify the circuit after calling this function to add more instances to `assigned_instances` to expose.
+    /// Also returns the limbs of the pair of elliptic curve points, referred to as the `accumulator`, that need to be verified in a final pairing check.
     ///
     /// Warning: will fail silently if `snarks` were created using a different multi-open scheme than `AS`
     /// where `AS` can be either [`crate::SHPLONK`] or [`crate::GWC`] (for original PLONK multi-open scheme)
     pub fn new<AS>(
-        stage: CircuitBuilderStage,
-        agg_config: AggregationConfigParams,
-        break_points: Option<MultiPhaseThreadBreakPoints>,
+        witness_gen_only: bool,
+        lookup_bits: usize,
         params: &ParamsKZG<Bn256>,
         snarks: impl IntoIterator<Item = Snark>,
     ) -> Self
@@ -273,9 +282,9 @@ impl AggregationCircuit {
         };
 
         // create thread builder and run aggregation witness gen
-        let builder = GateThreadBuilder::from_stage(stage);
+        let builder = GateThreadBuilder::new(witness_gen_only);
         // create halo2loader
-        let range = RangeChip::<Fr>::default(agg_config.lookup_bits);
+        let range = RangeChip::<Fr>::default(lookup_bits);
         let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
         let ecc_chip = BaseFieldEccChip::new(&fp_chip);
         let loader = Halo2Loader::new(ecc_chip, builder);
@@ -284,7 +293,7 @@ impl AggregationCircuit {
             aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice());
         let lhs = accumulator.lhs.assigned();
         let rhs = accumulator.rhs.assigned();
-        let assigned_instances = lhs
+        let accumulator = lhs
             .x()
             .limbs()
             .iter()
@@ -299,20 +308,49 @@ impl AggregationCircuit {
             let KzgAccumulator { lhs, rhs } = _accumulator;
             let instances =
                 [lhs.x, lhs.y, rhs.x, rhs.y].map(fe_to_limbs::<_, Fr, LIMBS, BITS>).concat();
-            for (lhs, rhs) in instances.iter().zip(assigned_instances.iter()) {
+            for (lhs, rhs) in instances.iter().zip(accumulator.iter()) {
                 assert_eq!(lhs, rhs.value());
             }
         }
 
         let builder = loader.take_ctx();
+        Self { builder, accumulator, previous_instances }
+    }
+}
+
+impl AggregationCircuit {
+    /// Given snarks, this creates a circuit and runs the `GateThreadBuilder` to verify all the snarks.
+    /// By default, the returned circuit has public instances equal to the limbs of the pair of elliptic curve points, referred to as the `accumulator`, that need to be verified in a final pairing check.
+    ///
+    /// The user can optionally modify the circuit after calling this function to add more instances to `assigned_instances` to expose.
+    ///
+    /// Warning: will fail silently if `snarks` were created using a different multi-open scheme than `AS`
+    /// where `AS` can be either [`crate::SHPLONK`] or [`crate::GWC`] (for original PLONK multi-open scheme)
+    pub fn new<AS>(
+        stage: CircuitBuilderStage,
+        agg_config: AggregationConfigParams,
+        break_points: Option<MultiPhaseThreadBreakPoints>,
+        params: &ParamsKZG<Bn256>,
+        snarks: impl IntoIterator<Item = Snark>,
+    ) -> Self
+    where
+        AS: for<'a> Halo2KzgAccumulationScheme<'a>,
+    {
+        let AggregationCtxBuilder { builder, accumulator, previous_instances } =
+            AggregationCtxBuilder::new::<AS>(
+                stage == CircuitBuilderStage::Prover,
+                agg_config.lookup_bits,
+                params,
+                snarks,
+            );
         let inner = RangeWithInstanceCircuitBuilder::from_stage(
             stage,
             builder,
             agg_config.into(),
             break_points,
-            assigned_instances,
+            accumulator,
         );
-        Self { inner, previous_instances, as_proof }
+        Self { inner, previous_instances }
     }
 
     pub fn public<AS>(
@@ -339,10 +377,6 @@ impl AggregationCircuit {
         for prev in self.previous_instances.iter() {
             self.inner.assigned_instances.extend_from_slice(&prev[start..]);
         }
-    }
-
-    pub fn as_proof(&self) -> &[u8] {
-        &self.as_proof[..]
     }
 
     /// Auto-configure the circuit and change the circuit's internal configuration parameters.
