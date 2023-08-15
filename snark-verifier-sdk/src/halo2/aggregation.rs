@@ -168,10 +168,10 @@ impl TryFrom<&BaseConfigParams> for AggregationConfigParams {
     type Error = &'static str;
 
     fn try_from(params: &BaseConfigParams) -> Result<Self, Self::Error> {
-        if params.num_advice_per_phase.len() != 1 {
+        if params.num_advice_per_phase.iter().skip(1).filter(|&n| *n != 0).next().is_some() {
             return Err("AggregationConfigParams only supports 1 phase");
         }
-        if params.num_lookup_advice_per_phase.len() != 1 {
+        if params.num_lookup_advice_per_phase.iter().skip(1).filter(|&n| *n != 0).next().is_some() {
             return Err("AggregationConfigParams only supports 1 phase");
         }
         if params.lookup_bits.is_none() {
