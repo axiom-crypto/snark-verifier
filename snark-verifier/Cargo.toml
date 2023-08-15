@@ -18,7 +18,7 @@ pairing = { version = "0.23" }
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "sync/use-ff-0.13", default-features = false }
 # This is Scroll's audited poseidon circuit. We only use it for the Native Poseidon spec. We do not use the halo2 circuit at all (and it wouldn't even work because the halo2_proofs tag is not compatbile).
 # We forked it to upgrade to ff v0.13 and removed the circuit module
-poseidon-rs = { git = "https://github.com/axiom-crypto/poseidon-circuit.git", branch = "sync/use-ff-0.13" }
+poseidon-rs = { git = "https://github.com/axiom-crypto/poseidon-circuit.git", rev = "1aee4a1" }
 # poseidon-circuit = { git = "https://github.com/scroll-tech/poseidon-circuit.git", rev = "50015b7" }
 
 # parallel

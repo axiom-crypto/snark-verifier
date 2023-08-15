@@ -53,7 +53,7 @@ parallel = ["snark-verifier/parallel"]
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
 
-zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
+# zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
 [[bench]]
 name = "standard_plonk"
