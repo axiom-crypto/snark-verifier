@@ -1,4 +1,4 @@
-use halo2_base::gates::builder::CircuitBuilderStage;
+use halo2_base::gates::circuit::CircuitBuilderStage;
 use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::arithmetic::Field;
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
@@ -162,12 +162,11 @@ fn main() {
     let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,
         AggregationConfigParams { degree: k, lookup_bits, ..Default::default() },
-        None,
         &params,
         vec![dummy_snark],
         VerifierUniversality::Full,
     );
-    let agg_config = agg_circuit.config(Some(10));
+    let agg_config = agg_circuit.calculate_params(Some(10));
 
     let pk = gen_pk(&params, &agg_circuit, None);
     let break_points = agg_circuit.break_points();
@@ -177,11 +176,11 @@ fn main() {
         let agg_circuit = AggregationCircuit::new::<SHPLONK>(
             CircuitBuilderStage::Prover,
             agg_config,
-            Some(break_points.clone()),
             &params,
             vec![snark],
             VerifierUniversality::Full,
-        );
+        )
+        .use_break_points(break_points.clone());
         let _snark = gen_snark_shplonk(&params, &pk, agg_circuit, None::<&str>);
         println!("snark with k = {k} success");
     }

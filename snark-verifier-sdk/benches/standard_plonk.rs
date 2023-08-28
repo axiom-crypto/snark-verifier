@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use criterion::{criterion_group, criterion_main};
 use criterion::{BenchmarkId, Criterion};
-use halo2_base::gates::builder::CircuitBuilderStage;
+use halo2_base::gates::circuit::CircuitBuilderStage;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
@@ -19,7 +19,6 @@ use snark_verifier_sdk::{
     Snark,
 };
 use snark_verifier_sdk::{CircuitExt, SHPLONK};
-use std::path::Path;
 
 mod application {
     use super::halo2_curves::bn256::Fr;
@@ -175,8 +174,8 @@ mod application {
 fn gen_application_snark(params: &ParamsKZG<Bn256>) -> Snark {
     let circuit = application::StandardPlonk::rand(OsRng);
 
-    let pk = gen_pk(params, &circuit, Some(Path::new("app.pk")));
-    gen_snark_shplonk(params, &pk, circuit, Some(Path::new("app.snark")))
+    let pk = gen_pk(params, &circuit, None);
+    gen_snark_shplonk(params, &pk, circuit, None::<&str>)
 }
 
 fn bench(c: &mut Criterion) {
@@ -190,16 +189,16 @@ fn bench(c: &mut Criterion) {
     let agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,
         agg_config,
-        None,
         &params,
         snarks.clone(),
         VerifierUniversality::None,
     );
 
     let start0 = start_timer!(|| "gen vk & pk");
-    let pk = gen_pk(&params, &agg_circuit, Some(Path::new("agg.pk")));
+    let pk = gen_pk(&params, &agg_circuit, None);
     end_timer!(start0);
     let break_points = agg_circuit.break_points();
+    drop(agg_circuit);
 
     let mut group = c.benchmark_group("plonk-prover");
     group.sample_size(10);
@@ -211,11 +210,11 @@ fn bench(c: &mut Criterion) {
                 let agg_circuit = AggregationCircuit::new::<SHPLONK>(
                     CircuitBuilderStage::Prover,
                     agg_config,
-                    Some(break_points.clone()),
                     params,
                     snarks.clone(),
                     VerifierUniversality::None,
-                );
+                )
+                .use_break_points(break_points.clone());
                 let instances = agg_circuit.instances();
                 gen_proof_shplonk(params, pk, agg_circuit, instances, None)
             })
@@ -229,11 +228,11 @@ fn bench(c: &mut Criterion) {
         let agg_circuit = AggregationCircuit::new::<SHPLONK>(
             CircuitBuilderStage::Prover,
             agg_config,
-            Some(break_points),
             &params,
             snarks.clone(),
             VerifierUniversality::None,
-        );
+        )
+        .use_break_points(break_points);
         let num_instances = agg_circuit.num_instance();
         let instances = agg_circuit.instances();
         let proof = gen_evm_proof_shplonk(&params, &pk, agg_circuit, instances.clone());
