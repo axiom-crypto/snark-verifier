@@ -2,10 +2,8 @@
 
 use ark_std::{end_timer, start_timer};
 use common::*;
-use halo2_base::gates::builder::BaseConfigParams;
-use halo2_base::gates::flex_gate::GateStrategy;
-use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
+use halo2_base::{gates::circuit::BaseCircuitParams, halo2_proofs};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
@@ -342,10 +340,12 @@ mod application {
 }
 
 mod recursion {
+    use std::mem;
+
     use halo2_base::{
         gates::{
-            builder::{GateThreadBuilder, PublicBaseConfig, RangeWithInstanceCircuitBuilder},
-            GateInstructions, RangeChip, RangeInstructions,
+            circuit::{builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig},
+            GateInstructions, RangeInstructions,
         },
         AssignedValue,
     };
@@ -426,7 +426,7 @@ mod recursion {
             .zip([rhs.lhs.assigned(), rhs.rhs.assigned()].iter())
             .map(|(lhs, rhs)| {
                 loader.ecc_chip().select(
-                    loader.ctx_mut().main(0),
+                    loader.ctx_mut().main(),
                     EcPoint::clone(lhs),
                     EcPoint::clone(rhs),
                     *condition,
@@ -471,9 +471,8 @@ mod recursion {
         round: usize,
         instances: Vec<Fr>,
         as_proof: Vec<u8>,
-        lookup_bits: usize,
 
-        inner: RangeWithInstanceCircuitBuilder<Fr>,
+        inner: BaseCircuitBuilder<Fr>,
     }
 
     impl RecursionCircuit {
@@ -489,7 +488,7 @@ mod recursion {
             initial_state: Fr,
             state: Fr,
             round: usize,
-            config_params: BaseConfigParams,
+            config_params: BaseCircuitParams,
         ) -> Self {
             let svk = params.get_g()[0].into();
             let default_accumulator = KzgAccumulator::new(params.get_g()[1], params.get_g()[0]);
@@ -544,42 +543,30 @@ mod recursion {
                     .chain([preprocessed_digest, initial_state, state, Fr::from(round as u64)])
                     .collect();
 
-            let builder = GateThreadBuilder::mock();
-            let lookup_bits = config_params.lookup_bits.unwrap();
-            let inner = RangeWithInstanceCircuitBuilder::mock(builder, config_params, vec![]);
-            let mut circuit = Self {
-                svk,
-                default_accumulator,
-                app,
-                previous,
-                round,
-                instances,
-                as_proof,
-                inner,
-                lookup_bits,
-            };
+            let inner = BaseCircuitBuilder::new(false).use_params(config_params);
+            let mut circuit =
+                Self { svk, default_accumulator, app, previous, round, instances, as_proof, inner };
             circuit.build();
             circuit
         }
 
         fn build(&mut self) {
-            let range = RangeChip::<Fr>::default(self.lookup_bits);
+            let range = self.inner.range_chip();
             let main_gate = range.gate();
-            let mut builder = GateThreadBuilder::mock();
-            let ctx = &mut builder;
+            let pool = self.inner.pool(0);
             let [preprocessed_digest, initial_state, state, round] = [
                 self.instances[Self::PREPROCESSED_DIGEST_ROW],
                 self.instances[Self::INITIAL_STATE_ROW],
                 self.instances[Self::STATE_ROW],
                 self.instances[Self::ROUND_ROW],
             ]
-            .map(|instance| main_gate.assign_integer(ctx, instance));
-            let first_round = main_gate.is_zero(ctx.main(0), round);
-            let not_first_round = main_gate.not(ctx.main(0), first_round);
+            .map(|instance| main_gate.assign_integer(pool, instance));
+            let first_round = main_gate.is_zero(pool.main(), round);
+            let not_first_round = main_gate.not(pool.main(), first_round);
 
             let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
             let ecc_chip = BaseFieldEccChip::new(&fp_chip);
-            let loader = Halo2Loader::new(ecc_chip, builder);
+            let loader = Halo2Loader::new(ecc_chip, mem::take(self.inner.pool(0)));
             let (mut app_instances, app_accumulators) =
                 succinct_verify(&self.svk, &loader, &self.app, None);
             let (mut previous_instances, previous_accumulators) =
@@ -610,8 +597,8 @@ mod recursion {
             let app_instances = app_instances.pop().unwrap();
             let previous_instances = previous_instances.pop().unwrap();
 
-            let mut builder = loader.take_ctx();
-            let ctx = builder.main(0);
+            let mut pool = loader.take_ctx();
+            let ctx = pool.main();
             for (lhs, rhs) in [
                 // Propagate preprocessed_digest
                 (
@@ -640,9 +627,9 @@ mod recursion {
             ] {
                 ctx.constrain_equal(lhs, rhs);
             }
-            *self.inner.circuit.0.builder.borrow_mut() = builder;
+            *self.inner.pool(0) = pool;
 
-            self.inner.assigned_instances.extend(
+            self.inner.assigned_instances[0].extend(
                 [lhs.x(), lhs.y(), rhs.x(), rhs.y()]
                     .into_iter()
                     .flat_map(|coordinate| coordinate.limbs())
@@ -654,7 +641,7 @@ mod recursion {
         fn initial_snark(
             params: &ParamsKZG<Bn256>,
             vk: Option<&VerifyingKey<G1Affine>>,
-            config_params: BaseConfigParams,
+            config_params: BaseCircuitParams,
         ) -> Snark {
             let mut snark = gen_dummy_snark::<RecursionCircuit>(params, vk, config_params);
             let g = params.get_g();
@@ -685,12 +672,12 @@ mod recursion {
     }
 
     impl Circuit<Fr> for RecursionCircuit {
-        type Config = PublicBaseConfig<Fr>;
+        type Config = BaseConfig<Fr>;
         type FloorPlanner = SimpleFloorPlanner;
-        type Params = BaseConfigParams;
+        type Params = BaseCircuitParams;
 
         fn params(&self) -> Self::Params {
-            self.inner.circuit.params()
+            self.inner.params()
         }
 
         fn without_witnesses(&self) -> Self {
@@ -701,7 +688,7 @@ mod recursion {
             meta: &mut ConstraintSystem<Fr>,
             params: Self::Params,
         ) -> Self::Config {
-            RangeWithInstanceCircuitBuilder::configure_with_params(meta, params)
+            BaseCircuitBuilder::configure_with_params(meta, params)
         }
 
         fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
@@ -732,7 +719,7 @@ mod recursion {
         }
 
         fn selectors(config: &Self::Config) -> Vec<Selector> {
-            config.base.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
+            config.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
         }
     }
 
@@ -740,7 +727,7 @@ mod recursion {
         recursion_params: &ParamsKZG<Bn256>,
         app_params: &ParamsKZG<Bn256>,
         app_vk: &VerifyingKey<G1Affine>,
-        recursion_config: BaseConfigParams,
+        recursion_config: BaseCircuitParams,
         app_config: ConcreteCircuit::Params,
     ) -> ProvingKey<G1Affine>
     where
@@ -768,7 +755,7 @@ mod recursion {
         recursion_pk: &ProvingKey<G1Affine>,
         initial_state: Fr,
         inputs: Vec<ConcreteCircuit::Input>,
-        config_params: BaseConfigParams,
+        config_params: BaseCircuitParams,
     ) -> (Fr, Snark) {
         let mut state = initial_state;
         let mut app = ConcreteCircuit::new(state);
@@ -804,13 +791,13 @@ fn main() {
         serde_json::from_reader(fs::File::open("configs/example_recursion.json").unwrap()).unwrap();
     let k = recursion_config.degree;
     let recursion_params = gen_srs(k);
-    let config_params = BaseConfigParams {
-        strategy: GateStrategy::Vertical,
+    let config_params = BaseCircuitParams {
         k: k as usize,
         num_advice_per_phase: vec![recursion_config.num_advice],
         num_lookup_advice_per_phase: vec![recursion_config.num_lookup_advice],
         num_fixed: recursion_config.num_fixed,
         lookup_bits: Some(recursion_config.lookup_bits),
+        num_instance_columns: 1,
     };
 
     let app_pk = gen_pk(&app_params, &application::Square::default());

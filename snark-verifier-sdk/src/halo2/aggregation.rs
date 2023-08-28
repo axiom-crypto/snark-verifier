@@ -2,11 +2,9 @@ use super::PlonkSuccinctVerifier;
 use crate::{BITS, LIMBS};
 use halo2_base::{
     gates::{
-        builder::{
-            BaseConfigParams, CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints,
-            PublicBaseConfig, RangeWithInstanceCircuitBuilder,
+        circuit::{
+            builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig, CircuitBuilderStage,
         },
-        flex_gate::GateStrategy,
         RangeChip,
     },
     halo2_proofs::{

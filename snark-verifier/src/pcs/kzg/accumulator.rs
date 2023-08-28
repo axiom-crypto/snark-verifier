@@ -220,7 +220,7 @@ mod halo2 {
                 assert_eq!(limbs.len(), 2 * LIMBS);
 
                 let ec_point = self.assign_point::<C>(
-                    ctx.main(0),
+                    ctx.main(),
                     ec_point_from_limbs::<_, LIMBS, BITS>(
                         &limbs.iter().map(|limb| limb.value()).collect_vec(),
                     ),
@@ -230,7 +230,7 @@ mod halo2 {
                     .iter()
                     .zip_eq(iter::empty().chain(ec_point.x().limbs()).chain(ec_point.y().limbs()))
                 {
-                    ctx.main(0).constrain_equal(src, dst);
+                    ctx.main().constrain_equal(src, dst);
                 }
 
                 ec_point
