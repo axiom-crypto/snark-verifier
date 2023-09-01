@@ -203,7 +203,7 @@ mod halo2 {
                 let k = loader.assign_scalar(C::Scalar::from(self.domain.k as u64));
                 // n = 2^k
                 let two = loader.load_const(&C::Scalar::from(2));
-                let n = two.pow_var(&k, C::Scalar::S as usize + 1);
+                let n = two.pow_var(&k, bit_length(C::Scalar::S as u64) + 1);
                 // gen = omega = ROOT_OF_UNITY ^ {2^{S - k}}, where ROOT_OF_UNITY is primitive 2^S root of unity
                 // this makes omega a 2^k root of unity
                 let root_of_unity = loader.load_const(&C::Scalar::ROOT_OF_UNITY);
