@@ -23,7 +23,9 @@ where
     C: CurveAffine,
     L: Loader<C>,
 {
-    /// Number of rows in the domain
+    /// 2<sup>k</sup> is the number of rows in the domain
+    pub k: L::LoadedScalar,
+    /// n = 2<sup>k</sup> is the number of rows in the domain
     pub n: L::LoadedScalar,
     /// Generator of the domain
     pub gen: L::LoadedScalar,
@@ -65,7 +67,6 @@ where
         serialize = "L::LoadedScalar: Serialize",
         deserialize = "L::LoadedScalar: Deserialize<'de>"
     ))]
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// Optional: load `domain.n` and `domain.gen` as a witness
     pub domain_as_witness: Option<DomainAsWitness<C, L>>,
 
@@ -176,14 +177,15 @@ mod halo2 {
     use crate::{
         loader::{
             halo2::{EccInstructions, Halo2Loader},
-            LoadedScalar,
+            LoadedScalar, ScalarLoader,
         },
         util::arithmetic::CurveAffine,
         verifier::plonk::PlonkProtocol,
     };
+    use halo2_base::utils::bit_length;
     use std::rc::Rc;
 
-    use super::DomainAsWitness;
+    use super::{DomainAsWitness, PrimeField};
 
     impl<C> PlonkProtocol<C>
     where
@@ -195,13 +197,21 @@ mod halo2 {
         pub fn loaded_preprocessed_as_witness<EccChip: EccInstructions<C>>(
             &self,
             loader: &Rc<Halo2Loader<C, EccChip>>,
-            load_n_as_witness: bool,
+            load_k_as_witness: bool,
         ) -> PlonkProtocol<C, Rc<Halo2Loader<C, EccChip>>> {
-            let domain_as_witness = load_n_as_witness.then(|| {
-                let n = loader.assign_scalar(C::Scalar::from(self.domain.n as u64));
-                let gen = loader.assign_scalar(self.domain.gen);
+            let domain_as_witness = load_k_as_witness.then(|| {
+                let k = loader.assign_scalar(C::Scalar::from(self.domain.k as u64));
+                // n = 2^k
+                let two = loader.load_const(&C::Scalar::from(2));
+                let n = two.pow_var(&k, C::Scalar::S as usize + 1);
+                // gen = omega = ROOT_OF_UNITY ^ {2^{S - k}}, where ROOT_OF_UNITY is primitive 2^S root of unity
+                // this makes omega a 2^k root of unity
+                let root_of_unity = loader.load_const(&C::Scalar::ROOT_OF_UNITY);
+                let s = loader.load_const(&C::Scalar::from(C::Scalar::S as u64));
+                let exp = two.pow_var(&(s - &k), bit_length(C::Scalar::S as u64)); // if S - k < 0, constraint on max bits will fail
+                let gen = root_of_unity.pow_var(&exp, C::Scalar::S as usize); // 2^{S - k} < 2^S for k > 0
                 let gen_inv = gen.invert().expect("subgroup generation is invertible");
-                DomainAsWitness { n, gen, gen_inv }
+                DomainAsWitness { k, n, gen, gen_inv }
             });
 
             let preprocessed = self

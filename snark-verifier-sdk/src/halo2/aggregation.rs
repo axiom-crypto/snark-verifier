@@ -42,14 +42,20 @@ pub type Svk = KzgSuccinctVerifyingKey<G1Affine>;
 pub type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
 pub type Halo2Loader<'chip> = loader::halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
 
+#[derive(Clone, Debug)]
+pub struct PreprocessedAndDomainAsWitness {
+    // this is basically the vkey
+    pub preprocessed: Vec<AssignedValue<Fr>>,
+    pub k: AssignedValue<Fr>,
+}
+
+#[derive(Clone, Debug)]
 pub struct SnarkAggregationWitness<'a> {
     pub previous_instances: Vec<Vec<AssignedValue<Fr>>>,
     pub accumulator: KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
-    ///
-    /// This is only useful if preprocessed digest is loaded as witness (i.e., `preprocessed_as_witness` is true in `aggregate`), so we set it to `None` otherwise.
-    pub preprocessed_digests: Option<Vec<Vec<AssignedValue<Fr>>>>,
+    pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
 }
 
 /// Different possible stages of universality the aggregation circuit can support
@@ -60,7 +66,7 @@ pub enum VerifierUniversality {
     None,
     /// Preprocessed digest (commitments to fixed columns) is loaded as witness
     PreprocessedAsWitness,
-    /// Preprocessed as witness and number of rows in the circuit `n` loaded as witness
+    /// Preprocessed as witness and log_2(number of rows in the circuit) = k loaded as witness
     Full,
 }
 
@@ -69,7 +75,7 @@ impl VerifierUniversality {
         self != &VerifierUniversality::None
     }
 
-    pub fn n_as_witness(&self) -> bool {
+    pub fn k_as_witness(&self) -> bool {
         self == &VerifierUniversality::Full
     }
 }
@@ -117,7 +123,7 @@ where
     };
 
     let mut previous_instances = Vec::with_capacity(snarks.len());
-    let mut preprocessed_digests = Vec::with_capacity(snarks.len());
+    let mut preprocessed_witnesses = Vec::with_capacity(snarks.len());
     // to avoid re-loading the spec each time, we create one transcript and clear the stream
     let mut transcript = PoseidonTranscript::<Rc<Halo2Loader<'a>>, &[u8]>::from_spec(
         loader,
@@ -131,11 +137,11 @@ where
         .flat_map(|snark: &Snark| {
             let protocol = if preprocessed_as_witness {
                 // always load `domain.n` as witness if vkey is witness
-                snark.protocol.loaded_preprocessed_as_witness(loader, universality.n_as_witness())
+                snark.protocol.loaded_preprocessed_as_witness(loader, universality.k_as_witness())
             } else {
                 snark.protocol.loaded(loader)
             };
-            let inputs = protocol
+            let preprocessed = protocol
                 .preprocessed
                 .iter()
                 .flat_map(|preprocessed| {
@@ -148,19 +154,18 @@ where
                 .chain(
                     protocol.transcript_initial_state.clone().map(|scalar| scalar.into_assigned()),
                 )
-                .chain(
-                    protocol
-                        .domain_as_witness
-                        .as_ref()
-                        .map(|domain| domain.n.clone().into_assigned()),
-                ) // If `n` is witness, add it as part of input
-                .chain(
-                    protocol
-                        .domain_as_witness
-                        .as_ref()
-                        .map(|domain| domain.gen.clone().into_assigned()),
-                ) // If `n` is witness, add the generator of the order `n` subgroup as part of input
                 .collect_vec();
+            // Store `k` as witness. If `k` was fixed, assign it as a constant.
+            let k = protocol
+                .domain_as_witness
+                .as_ref()
+                .map(|domain| domain.k.clone().into_assigned())
+                .unwrap_or_else(|| {
+                    loader.ctx_mut().main().load_constant(Fr::from(protocol.domain.k as u64))
+                });
+            let preprocessed_and_k = PreprocessedAndDomainAsWitness { preprocessed, k };
+            preprocessed_witnesses.push(preprocessed_and_k);
+
             let instances = assign_instances(&snark.instances);
 
             // read the transcript and perform Fiat-Shamir
@@ -179,7 +184,6 @@ where
             previous_instances.push(
                 instances.into_iter().flatten().map(|scalar| scalar.into_assigned()).collect(),
             );
-            preprocessed_digests.push(inputs);
 
             accumulator
         })
@@ -198,9 +202,12 @@ where
     } else {
         accumulators.pop().unwrap()
     };
-    let preprocessed_digests = preprocessed_as_witness.then_some(preprocessed_digests);
 
-    SnarkAggregationWitness { previous_instances, accumulator, preprocessed_digests }
+    SnarkAggregationWitness {
+        previous_instances,
+        accumulator,
+        preprocessed: preprocessed_witnesses,
+    }
 }
 
 /// Same as `FlexGateConfigParams` except we assume a single Phase and default 'Vertical' strategy.
@@ -278,10 +285,8 @@ pub struct AggregationCircuit {
     previous_instances: Vec<Vec<AssignedValue<Fr>>>,
     /// This returns the assigned `preprocessed_digest` (vkey), optional `transcript_initial_state`, `domain.n` (optional), and `omega` (optional) values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
-    ///
-    /// This is only useful if preprocessed digest is loaded as witness (i.e., `universality != None`), so we set it to `None` if `universality == None`.
     #[getset(get = "pub")]
-    preprocessed_digests: Option<Vec<Vec<AssignedValue<Fr>>>>,
+    preprocessed: Vec<PreprocessedAndDomainAsWitness>,
     // accumulation scheme proof, no longer used
     // pub as_proof: Vec<u8>,
 }
@@ -380,7 +385,7 @@ impl AggregationCircuit {
         let loader = Halo2Loader::new(ecc_chip, pool);
 
         // run witness and copy constraint generation
-        let SnarkAggregationWitness { previous_instances, accumulator, preprocessed_digests } =
+        let SnarkAggregationWitness { previous_instances, accumulator, preprocessed } =
             aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
         let lhs = accumulator.lhs.assigned();
         let rhs = accumulator.rhs.assigned();
@@ -412,7 +417,7 @@ impl AggregationCircuit {
         );
         // expose accumulator as public instances
         builder.assigned_instances[0] = accumulator;
-        Self { builder, previous_instances, preprocessed_digests }
+        Self { builder, previous_instances, preprocessed }
     }
 
     /// Re-expose the previous public instances of aggregated snarks again.
