@@ -2,6 +2,7 @@ use super::{read_instances, write_instances, CircuitExt, PlonkSuccinctVerifier, 
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
+pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
 use halo2_proofs::{
     circuit::Layouter,
     halo2curves::{
@@ -26,7 +27,6 @@ use halo2_proofs::{
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use rand::{rngs::StdRng, SeedableRng};
-pub use snark_verifier::util::hash::OptimizedPoseidonSpec;
 use snark_verifier::{
     cost::CostEstimation,
     loader::native::NativeLoader,

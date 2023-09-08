@@ -24,7 +24,7 @@ fn test_mds() {
             "11597556804922396090267472882856054602429588299176362916247939723151043581408",
         ],
     ];
-    for (row1, row2) in mds.iter().zip_eq(spec.mds_matrices.mds.0.iter()) {
+    for (row1, row2) in mds.iter().zip_eq(spec.mds_matrices().mds().as_ref().iter()) {
         for (e1, e2) in row1.iter().zip_eq(row2.iter()) {
             assert_eq!(Fr::from_str_vartime(e1).unwrap(), *e2);
         }
