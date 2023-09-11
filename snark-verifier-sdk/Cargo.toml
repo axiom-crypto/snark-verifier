@@ -1,6 +1,6 @@
 [package]
 name = "snark-verifier-sdk"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -81,3 +81,7 @@ harness = false
 name = "read_pk"
 required-features = ["loader_halo2"]
 harness = false
+
+[[example]]
+name = "standard_plonk"
+required-features = ["loader_halo2", "loader_evm"]

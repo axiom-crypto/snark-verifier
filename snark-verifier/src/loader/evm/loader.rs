@@ -1,7 +1,7 @@
 use crate::{
     loader::{
         evm::{
-            code::{Precompiled, YulCode},
+            code::{Precompiled, SolidityAssemblyCode},
             fe_to_u256, modulus, u256_to_fe, U256, U512,
         },
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
@@ -52,7 +52,7 @@ impl<T: Debug> Value<T> {
 pub struct EvmLoader {
     base_modulus: U256,
     scalar_modulus: U256,
-    code: RefCell<YulCode>,
+    code: RefCell<SolidityAssemblyCode>,
     ptr: RefCell<usize>,
     cache: RefCell<HashMap<String, usize>>,
 }
@@ -70,7 +70,7 @@ impl EvmLoader {
     {
         let base_modulus = modulus::<Base>();
         let scalar_modulus = modulus::<Scalar>();
-        let code = YulCode::new();
+        let code = SolidityAssemblyCode::new();
 
         Rc::new(Self {
             base_modulus,
@@ -81,10 +81,14 @@ impl EvmLoader {
         })
     }
 
-    /// Returns generated yul code.
-    pub fn yul_code(self: &Rc<Self>) -> String {
+    /// Returns generated Solidity code. This is "Solidity" code that is wrapped in an assembly block.
+    /// In other words, it's basically just assembly (equivalently, Yul).
+    pub fn solidity_code(self: &Rc<Self>) -> String {
         let code = "
-            if not(success) { revert(0, 0) }
+            // Revert if anything fails
+            if iszero(success) { revert(0, 0) }
+
+            // Return empty bytes on success
             return(0, 0)"
             .to_string();
         self.code.borrow_mut().runtime_append(code);
@@ -104,7 +108,7 @@ impl EvmLoader {
         *self.ptr.borrow()
     }
 
-    pub(crate) fn code_mut(&self) -> impl DerefMut<Target = YulCode> + '_ {
+    pub(crate) fn code_mut(&self) -> impl DerefMut<Target = SolidityAssemblyCode> + '_ {
         self.code.borrow_mut()
     }
 
