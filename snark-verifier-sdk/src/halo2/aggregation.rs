@@ -389,8 +389,8 @@ where
     // create halo2loader
     let fp_chip = FpChip::<Fr>::new(range, BITS, LIMBS);
     let ecc_chip = BaseFieldEccChip::new(&fp_chip);
-    // Take the phase 0 pool from `builder`; it needs to be owned by loader.
-    // We put it back later (below), so it should have same effect as just mutating `builder.pool(0)`.
+    // `pool` needs to be owned by loader.
+    // We put it back later (below), so it should have same effect as just mutating `pool`.
     let tmp_pool = mem::take(pool);
     // range_chip has shared reference to LookupAnyManager, with shared CopyConstraintManager
     // pool has shared reference to CopyConstraintManager
