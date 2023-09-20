@@ -6,7 +6,8 @@ use halo2_base::{
         circuit::{
             builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig, CircuitBuilderStage,
         },
-        flex_gate::MultiPhaseThreadBreakPoints,
+        flex_gate::{threads::SinglePhaseCoreManager, MultiPhaseThreadBreakPoints},
+        RangeChip,
     },
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
@@ -314,6 +315,113 @@ pub trait Halo2KzgAccumulationScheme<'a> = PolynomialCommitmentScheme<
         VerifyingKey = KzgAsVerifyingKey,
     > + AccumulationSchemeProver<G1Affine, ProvingKey = KzgAsProvingKey<G1Affine>>;
 
+/// **Private** witnesses that form the output of [aggregate_snarks].
+/// Same as [SnarkAggregationWitness] except that we flatten `accumulator` into a vector of field elements.
+#[derive(Clone, Debug)]
+pub struct SnarkAggregationOutput {
+    pub previous_instances: Vec<Vec<AssignedValue<Fr>>>,
+    pub accumulator: Vec<AssignedValue<Fr>>,
+    /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
+    /// These can then be exposed as public instances.
+    pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
+}
+
+/// Given snarks, this populates the circuit builder with the virtual cells and constraints necessary to verify all the snarks.
+///
+/// ## Notes
+/// - This function does _not_ expose any public instances.
+/// - `svk` is the generator of the KZG trusted setup, usually gotten via `params.get_g()[0]`
+/// (avoids having to pass `params` into function just to get generator)
+///
+/// ## Universality
+/// - If `universality` is not `None`, then the verifying keys of each snark in `snarks` is loaded as a witness in the circuit.
+/// - Moreover, if `universality` is `Full`, then the number of rows `n` of each snark in `snarks` is also loaded as a witness. In this case the generator `omega` of the order `n` multiplicative subgroup of `F` is also loaded as a witness.
+/// - By default, these witnesses are _private_ and returned in `self.preprocessed_digests
+/// - The user can optionally modify the circuit after calling this function to add more instances to `assigned_instances` to expose.
+///
+/// ## Warning
+/// Will fail silently if `snarks` were created using a different multi-open scheme than `AS`
+/// where `AS` can be either [`crate::SHPLONK`] or [`crate::GWC`] (for original PLONK multi-open scheme)
+pub fn aggregate_snarks<AS>(
+    pool: &mut SinglePhaseCoreManager<Fr>,
+    range: &RangeChip<Fr>,
+    svk: Svk, // gotten by params.get_g()[0].into()
+    snarks: impl IntoIterator<Item = Snark>,
+    universality: VerifierUniversality,
+) -> SnarkAggregationOutput
+where
+    AS: for<'a> Halo2KzgAccumulationScheme<'a>,
+{
+    let snarks = snarks.into_iter().collect_vec();
+
+    let mut transcript_read =
+        PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(&[], POSEIDON_SPEC.clone());
+    // TODO: the snarks can probably store these accumulators
+    let accumulators = snarks
+        .iter()
+        .flat_map(|snark| {
+            transcript_read.new_stream(snark.proof());
+            let proof = PlonkSuccinctVerifier::<AS>::read_proof(
+                &svk,
+                &snark.protocol,
+                &snark.instances,
+                &mut transcript_read,
+            )
+            .unwrap();
+            PlonkSuccinctVerifier::<AS>::verify(&svk, &snark.protocol, &snark.instances, &proof)
+                .unwrap()
+        })
+        .collect_vec();
+
+    let (_accumulator, as_proof) = {
+        let mut transcript_write =
+            PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(vec![], POSEIDON_SPEC.clone());
+        let rng = StdRng::from_entropy();
+        let accumulator =
+            AS::create_proof(&Default::default(), &accumulators, &mut transcript_write, rng)
+                .unwrap();
+        (accumulator, transcript_write.finalize())
+    };
+
+    // create halo2loader
+    let fp_chip = FpChip::<Fr>::new(range, BITS, LIMBS);
+    let ecc_chip = BaseFieldEccChip::new(&fp_chip);
+    // Take the phase 0 pool from `builder`; it needs to be owned by loader.
+    // We put it back later (below), so it should have same effect as just mutating `builder.pool(0)`.
+    let tmp_pool = mem::take(pool);
+    // range_chip has shared reference to LookupAnyManager, with shared CopyConstraintManager
+    // pool has shared reference to CopyConstraintManager
+    let loader = Halo2Loader::new(ecc_chip, tmp_pool);
+
+    // run witness and copy constraint generation
+    let SnarkAggregationWitness { previous_instances, accumulator, preprocessed } =
+        aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
+    let lhs = accumulator.lhs.assigned();
+    let rhs = accumulator.rhs.assigned();
+    let accumulator = lhs
+        .x()
+        .limbs()
+        .iter()
+        .chain(lhs.y().limbs().iter())
+        .chain(rhs.x().limbs().iter())
+        .chain(rhs.y().limbs().iter())
+        .copied()
+        .collect_vec();
+
+    #[cfg(debug_assertions)]
+    {
+        let KzgAccumulator { lhs, rhs } = _accumulator;
+        let instances =
+            [lhs.x, lhs.y, rhs.x, rhs.y].map(fe_to_limbs::<_, Fr, LIMBS, BITS>).concat();
+        for (lhs, rhs) in instances.iter().zip(accumulator.iter()) {
+            assert_eq!(lhs, rhs.value());
+        }
+    }
+    // put back `pool` into `builder`
+    *pool = loader.take_ctx();
+    SnarkAggregationOutput { previous_instances, accumulator, preprocessed }
+}
+
 impl AggregationCircuit {
     /// Given snarks, this creates `BaseCircuitBuilder` and populates the circuit builder with the virtual cells and constraints necessary to verify all the snarks.
     ///
@@ -339,77 +447,10 @@ impl AggregationCircuit {
         AS: for<'a> Halo2KzgAccumulationScheme<'a>,
     {
         let svk: Svk = params.get_g()[0].into();
-        let snarks = snarks.into_iter().collect_vec();
-
-        let mut transcript_read =
-            PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(&[], POSEIDON_SPEC.clone());
-        // TODO: the snarks can probably store these accumulators
-        let accumulators = snarks
-            .iter()
-            .flat_map(|snark| {
-                transcript_read.new_stream(snark.proof());
-                let proof = PlonkSuccinctVerifier::<AS>::read_proof(
-                    &svk,
-                    &snark.protocol,
-                    &snark.instances,
-                    &mut transcript_read,
-                )
-                .unwrap();
-                PlonkSuccinctVerifier::<AS>::verify(&svk, &snark.protocol, &snark.instances, &proof)
-                    .unwrap()
-            })
-            .collect_vec();
-
-        let (_accumulator, as_proof) = {
-            let mut transcript_write = PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(
-                vec![],
-                POSEIDON_SPEC.clone(),
-            );
-            let rng = StdRng::from_entropy();
-            let accumulator =
-                AS::create_proof(&Default::default(), &accumulators, &mut transcript_write, rng)
-                    .unwrap();
-            (accumulator, transcript_write.finalize())
-        };
-
         let mut builder = BaseCircuitBuilder::from_stage(stage).use_params(config_params.into());
-        // create halo2loader
         let range = builder.range_chip();
-        let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
-        let ecc_chip = BaseFieldEccChip::new(&fp_chip);
-        // Take the phase 0 pool from `builder`; it needs to be owned by loader.
-        // We put it back later (below), so it should have same effect as just mutating `builder.pool(0)`.
-        let pool = mem::take(builder.pool(0));
-        // range_chip has shared reference to LookupAnyManager, with shared CopyConstraintManager
-        // pool has shared reference to CopyConstraintManager
-        let loader = Halo2Loader::new(ecc_chip, pool);
-
-        // run witness and copy constraint generation
-        let SnarkAggregationWitness { previous_instances, accumulator, preprocessed } =
-            aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
-        let lhs = accumulator.lhs.assigned();
-        let rhs = accumulator.rhs.assigned();
-        let accumulator = lhs
-            .x()
-            .limbs()
-            .iter()
-            .chain(lhs.y().limbs().iter())
-            .chain(rhs.x().limbs().iter())
-            .chain(rhs.y().limbs().iter())
-            .copied()
-            .collect_vec();
-
-        #[cfg(debug_assertions)]
-        {
-            let KzgAccumulator { lhs, rhs } = _accumulator;
-            let instances =
-                [lhs.x, lhs.y, rhs.x, rhs.y].map(fe_to_limbs::<_, Fr, LIMBS, BITS>).concat();
-            for (lhs, rhs) in instances.iter().zip(accumulator.iter()) {
-                assert_eq!(lhs, rhs.value());
-            }
-        }
-        // put back `pool` into `builder`
-        *builder.pool(0) = loader.take_ctx();
+        let SnarkAggregationOutput { previous_instances, accumulator, preprocessed } =
+            aggregate_snarks::<AS>(builder.pool(0), &range, svk, snarks, universality);
         assert_eq!(
             builder.assigned_instances.len(),
             1,
