@@ -342,6 +342,9 @@ pub struct SnarkAggregationOutput {
 /// ## Warning
 /// Will fail silently if `snarks` were created using a different multi-open scheme than `AS`
 /// where `AS` can be either [`crate::SHPLONK`] or [`crate::GWC`] (for original PLONK multi-open scheme)
+///
+/// ## Assumptions
+/// - `pool` and `range` reference the same `SharedCopyConstraintManager`.
 pub fn aggregate_snarks<AS>(
     pool: &mut SinglePhaseCoreManager<Fr>,
     range: &RangeChip<Fr>,
