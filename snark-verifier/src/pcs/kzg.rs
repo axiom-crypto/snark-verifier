@@ -18,7 +18,7 @@ pub use accumulator::LimbsEncodingInstructions;
 
 /// KZG succinct verifying key.
 #[derive(Clone, Copy, Debug)]
-pub struct KzgSuccinctVerifyingKey<C: CurveAffine> {
+pub struct KzgSuccinctVerifyingKey<C: Copy> {
     /// Generator.
     pub g: C,
 }

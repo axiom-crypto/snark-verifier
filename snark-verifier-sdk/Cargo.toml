@@ -1,6 +1,6 @@
 [package]
 name = "snark-verifier-sdk"
-version = "0.1.1"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -19,13 +19,10 @@ bincode = "1.3.3"
 ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "community-edition", default-features = false }
 snark-verifier = { path = "../snark-verifier", default-features = false }
+getset = "0.1.2"
 
 # loader_evm
-ethereum-types = { version = "=0.14.1", default-features = false, features = ["std"], optional = true }
-# sha3 = { version = "0.10", optional = true }
-# revm = { version = "2.3.1", optional = true }
-# bytes = { version = "1.2", optional = true }
-# rlp = { version = "0.5", default-features = false, features = ["std"], optional = true }
+ethereum-types = { version = "0.14.1", default-features = false, features = ["std"], optional = true }
 
 # zkevm benchmarks
 zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = ["test"], optional = true }
@@ -53,7 +50,7 @@ parallel = ["snark-verifier/parallel"]
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
 
-zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
+# zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
 [[bench]]
 name = "standard_plonk"
@@ -69,3 +66,12 @@ harness = false
 name = "zkevm_plus_state"
 required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
 harness = false
+
+[[bench]]
+name = "read_pk"
+required-features = ["loader_halo2"]
+harness = false
+
+[[example]]
+name = "standard_plonk"
+required-features = ["loader_halo2", "loader_evm"]

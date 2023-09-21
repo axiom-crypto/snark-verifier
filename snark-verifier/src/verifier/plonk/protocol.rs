@@ -1,7 +1,7 @@
 use crate::{
     loader::{native::NativeLoader, LoadedScalar, Loader},
     util::{
-        arithmetic::{CurveAffine, Domain, Field, Fraction, Rotation},
+        arithmetic::{CurveAffine, Domain, Field, Fraction, PrimeField, Rotation},
         Itertools,
     },
 };
@@ -9,12 +9,45 @@ use num_integer::Integer;
 use num_traits::One;
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::max,
+    cmp::{max, Ordering},
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     iter::{self, Sum},
     ops::{Add, Mul, Neg, Sub},
 };
+
+/// Domain parameters to be optionally loaded as witnesses
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DomainAsWitness<C, L>
+where
+    C: CurveAffine,
+    L: Loader<C>,
+{
+    /// 2<sup>k</sup> is the number of rows in the domain
+    pub k: L::LoadedScalar,
+    /// n = 2<sup>k</sup> is the number of rows in the domain
+    pub n: L::LoadedScalar,
+    /// Generator of the domain
+    pub gen: L::LoadedScalar,
+    /// Inverse generator of the domain
+    pub gen_inv: L::LoadedScalar,
+}
+
+impl<C, L> DomainAsWitness<C, L>
+where
+    C: CurveAffine,
+    L: Loader<C>,
+{
+    /// Rotate `F::one()` to given `rotation`.
+    pub fn rotate_one(&self, rotation: Rotation) -> L::LoadedScalar {
+        let loader = self.gen.loader();
+        match rotation.0.cmp(&0) {
+            Ordering::Equal => loader.load_one(),
+            Ordering::Greater => self.gen.pow_const(rotation.0 as u64),
+            Ordering::Less => self.gen_inv.pow_const(-rotation.0 as u64),
+        }
+    }
+}
 
 /// Protocol specifying configuration of a PLONK.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,6 +62,14 @@ where
     ))]
     /// Working domain.
     pub domain: Domain<C::Scalar>,
+
+    #[serde(bound(
+        serialize = "L::LoadedScalar: Serialize",
+        deserialize = "L::LoadedScalar: Deserialize<'de>"
+    ))]
+    /// Optional: load `domain.n` and `domain.gen` as a witness
+    pub domain_as_witness: Option<DomainAsWitness<C, L>>,
+
     #[serde(bound(
         serialize = "L::LoadedEcPoint: Serialize",
         deserialize = "L::LoadedEcPoint: Deserialize<'de>"
@@ -115,6 +156,7 @@ where
             .map(|transcript_initial_state| loader.load_const(transcript_initial_state));
         PlonkProtocol {
             domain: self.domain.clone(),
+            domain_as_witness: None,
             preprocessed,
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness.clone(),
@@ -133,11 +175,17 @@ where
 #[cfg(feature = "loader_halo2")]
 mod halo2 {
     use crate::{
-        loader::halo2::{EccInstructions, Halo2Loader},
+        loader::{
+            halo2::{EccInstructions, Halo2Loader},
+            LoadedScalar, ScalarLoader,
+        },
         util::arithmetic::CurveAffine,
         verifier::plonk::PlonkProtocol,
     };
+    use halo2_base::utils::bit_length;
     use std::rc::Rc;
+
+    use super::{DomainAsWitness, PrimeField};
 
     impl<C> PlonkProtocol<C>
     where
@@ -149,7 +197,23 @@ mod halo2 {
         pub fn loaded_preprocessed_as_witness<EccChip: EccInstructions<C>>(
             &self,
             loader: &Rc<Halo2Loader<C, EccChip>>,
+            load_k_as_witness: bool,
         ) -> PlonkProtocol<C, Rc<Halo2Loader<C, EccChip>>> {
+            let domain_as_witness = load_k_as_witness.then(|| {
+                let k = loader.assign_scalar(C::Scalar::from(self.domain.k as u64));
+                // n = 2^k
+                let two = loader.load_const(&C::Scalar::from(2));
+                let n = two.pow_var(&k, bit_length(C::Scalar::S as u64) + 1);
+                // gen = omega = ROOT_OF_UNITY ^ {2^{S - k}}, where ROOT_OF_UNITY is primitive 2^S root of unity
+                // this makes omega a 2^k root of unity
+                let root_of_unity = loader.load_const(&C::Scalar::ROOT_OF_UNITY);
+                let s = loader.load_const(&C::Scalar::from(C::Scalar::S as u64));
+                let exp = two.pow_var(&(s - &k), bit_length(C::Scalar::S as u64)); // if S - k < 0, constraint on max bits will fail
+                let gen = root_of_unity.pow_var(&exp, C::Scalar::S as usize); // 2^{S - k} < 2^S for k > 0
+                let gen_inv = gen.invert().expect("subgroup generation is invertible");
+                DomainAsWitness { k, n, gen, gen_inv }
+            });
+
             let preprocessed = self
                 .preprocessed
                 .iter()
@@ -161,6 +225,7 @@ mod halo2 {
                 .map(|transcript_initial_state| loader.assign_scalar(*transcript_initial_state));
             PlonkProtocol {
                 domain: self.domain.clone(),
+                domain_as_witness,
                 preprocessed,
                 num_instance: self.num_instance.clone(),
                 num_witness: self.num_witness.clone(),
@@ -201,26 +266,39 @@ where
     C: CurveAffine,
     L: Loader<C>,
 {
+    // if `n_as_witness` is Some, then we assume `n_as_witness` has value equal to `domain.n` (i.e., number of rows in the circuit)
+    // and is loaded as a witness instead of a constant.
+    // The generator of `domain` also depends on `n`.
     pub fn new(
         domain: &Domain<C::Scalar>,
-        langranges: impl IntoIterator<Item = i32>,
+        lagranges: impl IntoIterator<Item = i32>,
         z: &L::LoadedScalar,
+        domain_as_witness: &Option<DomainAsWitness<C, L>>,
     ) -> Self {
         let loader = z.loader();
 
-        let zn = z.pow_const(domain.n as u64);
-        let langranges = langranges.into_iter().sorted().dedup().collect_vec();
-
+        let lagranges = lagranges.into_iter().sorted().dedup().collect_vec();
         let one = loader.load_one();
+
+        let (zn, n_inv, omegas) = if let Some(domain) = domain_as_witness.as_ref() {
+            let zn = z.pow_var(&domain.n, C::Scalar::S as usize + 1);
+            let n_inv = domain.n.invert().expect("n is not zero");
+            let omegas = lagranges.iter().map(|&i| domain.rotate_one(Rotation(i))).collect_vec();
+            (zn, n_inv, omegas)
+        } else {
+            let zn = z.pow_const(domain.n as u64);
+            let n_inv = loader.load_const(&domain.n_inv);
+            let omegas = lagranges
+                .iter()
+                .map(|&i| loader.load_const(&domain.rotate_scalar(C::Scalar::ONE, Rotation(i))))
+                .collect_vec();
+            (zn, n_inv, omegas)
+        };
+
         let zn_minus_one = zn.clone() - &one;
         let zn_minus_one_inv = Fraction::one_over(zn_minus_one.clone());
 
-        let n_inv = loader.load_const(&domain.n_inv);
         let numer = zn_minus_one.clone() * &n_inv;
-        let omegas = langranges
-            .iter()
-            .map(|&i| loader.load_const(&domain.rotate_scalar(C::Scalar::one(), Rotation(i))))
-            .collect_vec();
         let lagrange_evals = omegas
             .iter()
             .map(|omega| Fraction::new(numer.clone() * omega, z.clone() - omega))
@@ -231,7 +309,7 @@ where
             zn_minus_one,
             zn_minus_one_inv,
             identity: z.clone(),
-            lagrange: langranges.into_iter().zip(lagrange_evals).collect(),
+            lagrange: lagranges.into_iter().zip(lagrange_evals).collect(),
         }
     }
 
@@ -478,7 +556,7 @@ impl<F: Clone + Default> Sum for Expression<F> {
 
 impl<F: Field> One for Expression<F> {
     fn one() -> Self {
-        Expression::Constant(F::one())
+        Expression::Constant(F::ONE)
     }
 }
 

@@ -3,7 +3,7 @@
 use crate::{
     loader::{native::NativeLoader, Loader},
     util::{
-        arithmetic::{CurveAffine, PrimeField},
+        arithmetic::{CurveAffine, Rotation},
         msm::Msm,
         transcript::{TranscriptRead, TranscriptWrite},
     },
@@ -18,24 +18,26 @@ pub mod kzg;
 /// Query to an oracle.
 /// It assumes all queries are based on the same point, but with some `shift`.
 #[derive(Clone, Debug)]
-pub struct Query<F: PrimeField, T = ()> {
+pub struct Query<S, T = ()> {
     /// Index of polynomial to query
     pub poly: usize,
     /// Shift of the query point.
-    pub shift: F,
+    pub shift: S,
+    /// Shift loaded as either constant or witness. It is user's job to ensure this is correctly constrained to have value equal to `shift`
+    pub loaded_shift: T,
     /// Evaluation read from transcript.
     pub eval: T,
 }
 
-impl<F: PrimeField> Query<F> {
+impl<S> Query<S> {
     /// Initialize [`Query`] without evaluation.
-    pub fn new(poly: usize, shift: F) -> Self {
-        Self { poly, shift, eval: () }
+    pub fn new(poly: usize, shift: S) -> Self {
+        Self { poly, shift, loaded_shift: (), eval: () }
     }
 
-    /// Returns [`Query`] with evaluation.
-    pub fn with_evaluation<T>(self, eval: T) -> Query<F, T> {
-        Query { poly: self.poly, shift: self.shift, eval }
+    /// Returns [`Query`] with evaluation and optionally the shift are loaded as.
+    pub fn with_evaluation<T>(self, loaded_shift: T, eval: T) -> Query<S, T> {
+        Query { poly: self.poly, shift: self.shift, loaded_shift, eval }
     }
 }
 
@@ -55,7 +57,7 @@ where
     /// Read [`PolynomialCommitmentScheme::Proof`] from transcript.
     fn read_proof<T>(
         vk: &Self::VerifyingKey,
-        queries: &[Query<C::Scalar>],
+        queries: &[Query<Rotation>],
         transcript: &mut T,
     ) -> Result<Self::Proof, Error>
     where
@@ -66,7 +68,7 @@ where
         vk: &Self::VerifyingKey,
         commitments: &[Msm<C, L>],
         point: &L::LoadedScalar,
-        queries: &[Query<C::Scalar, L::LoadedScalar>],
+        queries: &[Query<Rotation, L::LoadedScalar>],
         proof: &Self::Proof,
     ) -> Result<Self::Output, Error>;
 }

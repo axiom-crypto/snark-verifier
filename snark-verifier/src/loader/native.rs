@@ -2,7 +2,7 @@
 
 use crate::{
     loader::{EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader},
-    util::arithmetic::{Curve, CurveAffine, FieldOps, PrimeField},
+    util::arithmetic::{fe_to_big, Curve, CurveAffine, FieldOps, PrimeField},
     Error,
 };
 use lazy_static::lazy_static;
@@ -37,6 +37,11 @@ impl<F: PrimeField> LoadedScalar<F> for F {
 
     fn loader(&self) -> &NativeLoader {
         &LOADER
+    }
+
+    fn pow_var(&self, exp: &Self, _: usize) -> Self {
+        let exp = fe_to_big(*exp).to_u64_digits();
+        self.pow_vartime(exp)
     }
 }
 

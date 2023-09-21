@@ -4,3 +4,7 @@
 /target
 testdata
 
+Cargo.lock
+params
+agg.pk
+break_points.json

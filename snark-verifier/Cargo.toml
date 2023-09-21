@@ -1,32 +1,28 @@
 [package]
 name = "snark-verifier"
-version = "0.1.1"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
-itertools = "0.10.5"
-lazy_static = "1.4.0"
-num-bigint = "0.4.3"
+itertools = "0.11"
+lazy_static = "1.4"
+num-bigint = "0.4"
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 hex = "0.4"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+pairing = { version = "0.23" }
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "community-edition", default-features = false }
-# This is Scroll's audited poseidon circuit. We only use it for the Native Poseidon spec. We do not use the halo2 circuit at all (and it wouldn't even work because the halo2_proofs tag is not compatbile).
-poseidon-circuit = { git = "https://github.com/scroll-tech/poseidon-circuit.git", rev = "50015b7" }
 
 # parallel
-rayon = { version = "1.7.0", optional = true }
+rayon = { version = "1.7", optional = true }
 
 # loader_evm
 sha3 = { version = "0.10", optional = true }
-bytes = { version = "1.4.0", default-features = false, optional = true }
-primitive-types = { version = "0.12.1", default-features = false, features = ["std"], optional = true }
-rlp = { version = "0.5.2", default-features = false, features = ["std"], optional = true }
-revm = { version = "= 2.3.1", optional = true }
+revm = { version = "3.3.0", optional = true }
 
 # loader_halo2
 halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "community-edition", default-features = false, optional = true }
@@ -44,7 +40,7 @@ tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 [features]
 default = ["loader_evm", "loader_halo2", "halo2-axiom", "display"]
 display = ["halo2-base/display", "halo2-ecc?/display"]
-loader_evm = ["dep:primitive-types", "dep:sha3", "dep:revm", "dep:bytes", "dep:rlp"]
+loader_evm = ["dep:sha3", "dep:revm"]
 loader_halo2 = ["halo2-ecc"]
 parallel = ["dep:rayon"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo

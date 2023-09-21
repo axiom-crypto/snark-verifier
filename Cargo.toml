@@ -3,6 +3,7 @@ members = [
     "snark-verifier",
     "snark-verifier-sdk",
 ]
+resolver = "2"
 
 [profile.dev]
 opt-level = 3

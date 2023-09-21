@@ -13,7 +13,10 @@ use crate::{
     },
     Error,
 };
-use std::{collections::HashMap, iter};
+use std::{
+    collections::{BTreeMap, HashMap},
+    iter,
+};
 
 /// Proof of PLONK with [`PolynomialCommitmentScheme`] that has
 /// [`AccumulationScheme`].
@@ -153,26 +156,42 @@ where
     }
 
     /// Empty queries
-    pub fn empty_queries(protocol: &PlonkProtocol<C, L>) -> Vec<pcs::Query<C::Scalar>> {
-        protocol
-            .queries
-            .iter()
-            .map(|query| {
-                let shift = protocol.domain.rotate_scalar(C::Scalar::one(), query.rotation);
-                pcs::Query::new(query.poly, shift)
-            })
-            .collect()
+    pub fn empty_queries(protocol: &PlonkProtocol<C, L>) -> Vec<pcs::Query<Rotation>> {
+        // `preprocessed` should always be non-empty, unless the circuit has no constraints or constants
+        protocol.queries.iter().map(|query| pcs::Query::new(query.poly, query.rotation)).collect()
     }
 
     pub(super) fn queries(
         &self,
         protocol: &PlonkProtocol<C, L>,
         mut evaluations: HashMap<Query, L::LoadedScalar>,
-    ) -> Vec<pcs::Query<C::Scalar, L::LoadedScalar>> {
+    ) -> Vec<pcs::Query<Rotation, L::LoadedScalar>> {
+        if protocol.queries.is_empty() {
+            return vec![];
+        }
+        let loader = evaluations[&protocol.queries[0]].loader();
+        let rotations =
+            protocol.queries.iter().map(|query| query.rotation).sorted().dedup().collect_vec();
+        let loaded_shifts = if let Some(domain) = protocol.domain_as_witness.as_ref() {
+            // the `rotation`s are still constants, it is only generator `omega` that might be witness
+            BTreeMap::from_iter(
+                rotations.into_iter().map(|rotation| (rotation, domain.rotate_one(rotation))),
+            )
+        } else {
+            BTreeMap::from_iter(rotations.into_iter().map(|rotation| {
+                (
+                    rotation,
+                    loader.load_const(&protocol.domain.rotate_scalar(C::Scalar::ONE, rotation)),
+                )
+            }))
+        };
         Self::empty_queries(protocol)
             .into_iter()
             .zip(protocol.queries.iter().map(|query| evaluations.remove(query).unwrap()))
-            .map(|(query, eval)| query.with_evaluation(eval))
+            .map(|(query, eval)| {
+                let shift = loaded_shifts[&query.shift].clone();
+                query.with_evaluation(shift, eval)
+            })
             .collect()
     }
 

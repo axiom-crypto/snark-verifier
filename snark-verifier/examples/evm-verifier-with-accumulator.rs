@@ -1,5 +1,9 @@
 use aggregation::{AggregationCircuit, AggregationConfigParams};
-use halo2_base::{gates::builder::CircuitBuilderStage, halo2_proofs, utils::fs::gen_srs};
+use halo2_base::{
+    gates::circuit::{BaseCircuitParams, CircuitBuilderStage},
+    halo2_proofs,
+    utils::fs::gen_srs,
+};
 use halo2_proofs::{
     dev::MockProver,
     halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
@@ -19,14 +23,14 @@ use itertools::Itertools;
 use rand::rngs::OsRng;
 use snark_verifier::{
     loader::{
-        evm::{self, encode_calldata, Address, EvmLoader, ExecutorBuilder},
+        evm::{self, deploy_and_call, encode_calldata, EvmLoader},
         native::NativeLoader,
     },
     pcs::kzg::{Gwc19, KzgAs, LimbsEncoding},
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, SnarkVerifier},
 };
-use std::{env::set_var, fs::File, io::Cursor, rc::Rc};
+use std::{fs::File, io::Cursor, rc::Rc};
 
 const LIMBS: usize = 3;
 const BITS: usize = 88;
@@ -198,22 +202,11 @@ mod application {
 mod aggregation {
     use crate::PlonkSuccinctVerifier;
 
-    use super::halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
-        plonk::{self, Circuit, Column, Instance},
-    };
     use super::{As, BITS, LIMBS};
     use super::{Fr, G1Affine};
-    use halo2_base::{
-        gates::{
-            builder::{
-                assign_threads_in, CircuitBuilderStage, FlexGateConfigParams, GateThreadBuilder,
-                MultiPhaseThreadBreakPoints, RangeCircuitBuilder,
-            },
-            range::RangeConfig,
-            RangeChip,
-        },
-        AssignedValue, SKIP_FIRST_PASS,
+    use halo2_base::gates::{
+        circuit::{builder::BaseCircuitBuilder, BaseCircuitParams, CircuitBuilderStage},
+        flex_gate::MultiPhaseThreadBreakPoints,
     };
     use halo2_ecc::bn254::FpChip;
     use itertools::Itertools;
@@ -228,7 +221,7 @@ mod aggregation {
         util::arithmetic::fe_to_limbs,
         verifier::{plonk::PlonkProtocol, SnarkVerifier},
     };
-    use std::{collections::HashMap, rc::Rc};
+    use std::{mem, rc::Rc};
 
     const T: usize = 3;
     const RATE: usize = 2;
@@ -300,7 +293,7 @@ mod aggregation {
         As::verify(&Default::default(), &accumulators, &proof).unwrap()
     }
 
-    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(serde::Serialize, serde::Deserialize, Default)]
     pub struct AggregationConfigParams {
         pub degree: u32,
         pub num_advice: usize,
@@ -309,24 +302,17 @@ mod aggregation {
         pub lookup_bits: usize,
     }
 
-    #[derive(Clone)]
-    pub struct AggregationConfig {
-        pub range: RangeConfig<Fr>,
-        pub instance: Column<Instance>,
-    }
-
     #[derive(Clone, Debug)]
     pub struct AggregationCircuit {
-        pub circuit: RangeCircuitBuilder<Fr>,
+        pub inner: BaseCircuitBuilder<Fr>,
         pub as_proof: Vec<u8>,
-        pub assigned_instances: Vec<AssignedValue<Fr>>,
     }
 
     impl AggregationCircuit {
         pub fn new(
             stage: CircuitBuilderStage,
+            circuit_params: BaseCircuitParams,
             break_points: Option<MultiPhaseThreadBreakPoints>,
-            lookup_bits: usize,
             params_g0: G1Affine,
             snarks: impl IntoIterator<Item = Snark>,
         ) -> Self {
@@ -361,18 +347,15 @@ mod aggregation {
                 (accumulator, transcript.finalize())
             };
 
-            // create thread builder and run aggregation witness gen
-            let builder = match stage {
-                CircuitBuilderStage::Mock => GateThreadBuilder::mock(),
-                CircuitBuilderStage::Prover => GateThreadBuilder::prover(),
-                CircuitBuilderStage::Keygen => GateThreadBuilder::keygen(),
-            };
+            let mut builder = BaseCircuitBuilder::from_stage(stage).use_params(circuit_params);
             // create halo2loader
-            let range = RangeChip::<Fr>::default(lookup_bits);
+            let range = builder.range_chip();
             let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
             let ecc_chip = BaseFieldEccChip::new(&fp_chip);
-            let loader = Halo2Loader::new(ecc_chip, builder);
+            let pool = mem::take(builder.pool(0));
+            let loader = Halo2Loader::new(ecc_chip, pool);
 
+            // witness generation
             let KzgAccumulator { lhs, rhs } =
                 aggregate(&svk, &loader, &snarks, as_proof.as_slice());
             let lhs = lhs.assigned();
@@ -397,23 +380,12 @@ mod aggregation {
                 }
             }
 
-            let builder = loader.take_ctx();
-            let circuit = match stage {
-                CircuitBuilderStage::Mock => RangeCircuitBuilder::mock(builder),
-                CircuitBuilderStage::Keygen => RangeCircuitBuilder::keygen(builder),
-                CircuitBuilderStage::Prover => {
-                    RangeCircuitBuilder::prover(builder, break_points.unwrap())
-                }
-            };
-            Self { circuit, as_proof, assigned_instances }
-        }
-
-        pub fn config(&self, k: u32, minimum_rows: Option<usize>) -> FlexGateConfigParams {
-            self.circuit.0.builder.borrow().config(k as usize, minimum_rows)
-        }
-
-        pub fn break_points(&self) -> MultiPhaseThreadBreakPoints {
-            self.circuit.0.break_points.borrow().clone()
+            *builder.pool(0) = loader.take_ctx();
+            builder.assigned_instances[0] = assigned_instances;
+            if let Some(break_points) = break_points {
+                builder.set_break_points(break_points);
+            }
+            Self { inner: builder, as_proof }
         }
 
         pub fn num_instance() -> Vec<usize> {
@@ -422,106 +394,15 @@ mod aggregation {
         }
 
         pub fn instances(&self) -> Vec<Vec<Fr>> {
-            vec![self.assigned_instances.iter().map(|v| *v.value()).collect_vec()]
+            self.inner
+                .assigned_instances
+                .iter()
+                .map(|v| v.iter().map(|v| *v.value()).collect_vec())
+                .collect()
         }
 
         pub fn accumulator_indices() -> Vec<(usize, usize)> {
             (0..4 * LIMBS).map(|idx| (0, idx)).collect()
-        }
-    }
-
-    impl Circuit<Fr> for AggregationCircuit {
-        type Config = AggregationConfig;
-        type FloorPlanner = SimpleFloorPlanner;
-
-        fn without_witnesses(&self) -> Self {
-            unimplemented!()
-        }
-
-        fn configure(meta: &mut plonk::ConstraintSystem<Fr>) -> Self::Config {
-            let range = RangeCircuitBuilder::configure(meta);
-            let instance = meta.instance_column();
-            meta.enable_equality(instance);
-            AggregationConfig { range, instance }
-        }
-
-        fn synthesize(
-            &self,
-            config: Self::Config,
-            mut layouter: impl Layouter<Fr>,
-        ) -> Result<(), plonk::Error> {
-            // copied from RangeCircuitBuilder::synthesize but with extra logic to expose public instances
-            let range = config.range;
-            let circuit = &self.circuit.0;
-            range.load_lookup_table(&mut layouter).expect("load lookup table should not fail");
-
-            // we later `take` the builder, so we need to save this value
-            let witness_gen_only = circuit.builder.borrow().witness_gen_only();
-            let mut assigned_advices = HashMap::new();
-
-            let mut first_pass = SKIP_FIRST_PASS;
-            layouter
-                .assign_region(
-                    || "AggregationCircuit",
-                    |mut region| {
-                        if first_pass {
-                            first_pass = false;
-                            return Ok(());
-                        }
-                        // only support FirstPhase in this Builder because getting challenge value requires more specialized witness generation during synthesize
-                        if !witness_gen_only {
-                            // clone the builder so we can re-use the circuit for both vk and pk gen
-                            let builder = circuit.builder.borrow();
-                            let assignments = builder.assign_all(
-                                &range.gate,
-                                &range.lookup_advice,
-                                &range.q_lookup,
-                                &mut region,
-                                Default::default(),
-                            );
-                            *circuit.break_points.borrow_mut() = assignments.break_points;
-                            assigned_advices = assignments.assigned_advices;
-                        } else {
-                            #[cfg(feature = "display")]
-                            let start0 = std::time::Instant::now();
-                            let builder = circuit.builder.take();
-                            let break_points = circuit.break_points.take();
-                            for (phase, (threads, break_points)) in builder
-                                .threads
-                                .into_iter()
-                                .zip(break_points.into_iter())
-                                .enumerate()
-                                .take(1)
-                            {
-                                assign_threads_in(
-                                    phase,
-                                    threads,
-                                    &range.gate,
-                                    &range.lookup_advice[phase],
-                                    &mut region,
-                                    break_points,
-                                );
-                            }
-                            #[cfg(feature = "display")]
-                            println!("assign threads in {:?}", start0.elapsed());
-                        }
-                        Ok(())
-                    },
-                )
-                .unwrap();
-
-            if !witness_gen_only {
-                // expose public instances
-                let mut layouter = layouter.namespace(|| "expose");
-                for (i, instance) in self.assigned_instances.iter().enumerate() {
-                    let cell = instance.cell.unwrap();
-                    let (cell, _) = assigned_advices
-                        .get(&(cell.context_id, cell.offset))
-                        .expect("instance not assigned");
-                    layouter.constrain_instance(*cell, config.instance, i);
-                }
-            }
-            Ok(())
         }
     }
 }
@@ -620,23 +501,13 @@ fn gen_aggregation_evm_verifier(
     let proof = PlonkVerifier::read_proof(&vk, &protocol, &instances, &mut transcript).unwrap();
     PlonkVerifier::verify(&vk, &protocol, &instances, &proof).unwrap();
 
-    evm::compile_yul(&loader.yul_code())
+    evm::compile_solidity(&loader.solidity_code())
 }
 
 fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
     let calldata = encode_calldata(&instances, &proof);
-    let success = {
-        let mut evm = ExecutorBuilder::default().with_gas_limit(u64::MAX.into()).build();
-
-        let caller = Address::from_low_u64_be(0xfe);
-        let verifier = evm.deploy(caller, deployment_code.into(), 0.into()).address.unwrap();
-        let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
-
-        dbg!(result.gas_used);
-
-        !result.reverted
-    };
-    assert!(success);
+    let gas_cost = deploy_and_call(deployment_code, calldata).unwrap();
+    dbg!(gas_cost);
 }
 
 fn main() {
@@ -649,25 +520,32 @@ fn main() {
         File::open(path).unwrap_or_else(|e| panic!("{path} does not exist: {e:?}")),
     )
     .unwrap();
-    let agg_circuit = AggregationCircuit::new(
+    let mut circuit_params = BaseCircuitParams {
+        k: agg_config.degree as usize,
+        num_advice_per_phase: vec![agg_config.num_advice],
+        num_lookup_advice_per_phase: vec![agg_config.num_lookup_advice],
+        num_fixed: agg_config.num_fixed,
+        lookup_bits: Some(agg_config.lookup_bits),
+        num_instance_columns: 1,
+    };
+    let mut agg_circuit = AggregationCircuit::new(
         CircuitBuilderStage::Mock,
+        circuit_params,
         None,
-        agg_config.lookup_bits,
         params_app.get_g()[0],
         snarks.clone(),
     );
-    agg_circuit.config(agg_config.degree, Some(6));
-    set_var("LOOKUP_BITS", agg_config.lookup_bits.to_string());
+    circuit_params = agg_circuit.inner.calculate_params(Some(9));
     #[cfg(debug_assertions)]
     {
-        MockProver::run(agg_config.degree, &agg_circuit, agg_circuit.instances())
+        MockProver::run(agg_config.degree, &agg_circuit.inner, agg_circuit.instances())
             .unwrap()
             .assert_satisfied();
         println!("mock prover passed");
     }
 
     let params = gen_srs(agg_config.degree);
-    let pk = gen_pk(&params, &agg_circuit);
+    let pk = gen_pk(&params, &agg_circuit.inner);
     let deployment_code = gen_aggregation_evm_verifier(
         &params,
         pk.get_vk(),
@@ -675,13 +553,13 @@ fn main() {
         aggregation::AggregationCircuit::accumulator_indices(),
     );
 
-    let break_points = agg_circuit.break_points();
+    let break_points = agg_circuit.inner.break_points();
     drop(agg_circuit);
 
     let agg_circuit = AggregationCircuit::new(
         CircuitBuilderStage::Prover,
+        circuit_params,
         Some(break_points),
-        agg_config.lookup_bits,
         params_app.get_g()[0],
         snarks,
     );
@@ -689,7 +567,7 @@ fn main() {
     let proof = gen_proof::<_, _, EvmTranscript<G1Affine, _, _, _>, EvmTranscript<G1Affine, _, _, _>>(
         &params,
         &pk,
-        agg_circuit,
+        agg_circuit.inner,
         instances.clone(),
     );
     evm_verify(deployment_code, instances, proof);

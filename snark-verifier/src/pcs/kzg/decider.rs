@@ -1,4 +1,7 @@
-use crate::{pcs::kzg::KzgSuccinctVerifyingKey, util::arithmetic::MultiMillerLoop};
+use crate::{
+    pcs::kzg::KzgSuccinctVerifyingKey,
+    util::arithmetic::{CurveAffine, MultiMillerLoop},
+};
 use std::marker::PhantomData;
 
 /// KZG deciding key.
@@ -23,7 +26,10 @@ impl<M: MultiMillerLoop> KzgDecidingKey<M> {
     }
 }
 
-impl<M: MultiMillerLoop> From<(M::G1Affine, M::G2Affine, M::G2Affine)> for KzgDecidingKey<M> {
+impl<M: MultiMillerLoop> From<(M::G1Affine, M::G2Affine, M::G2Affine)> for KzgDecidingKey<M>
+where
+    M::G1Affine: CurveAffine<ScalarExt = M::Fr, CurveExt = M::G1>,
+{
     fn from((g1, g2, s_g2): (M::G1Affine, M::G2Affine, M::G2Affine)) -> KzgDecidingKey<M> {
         KzgDecidingKey::new(g1, g2, s_g2)
     }
@@ -43,7 +49,7 @@ mod native {
             AccumulationDecider,
         },
         util::{
-            arithmetic::{Group, MillerLoopResult, MultiMillerLoop},
+            arithmetic::{CurveAffine, Group, MillerLoopResult, MultiMillerLoop},
             Itertools,
         },
         Error,
@@ -53,6 +59,7 @@ mod native {
     impl<M, MOS> AccumulationDecider<M::G1Affine, NativeLoader> for KzgAs<M, MOS>
     where
         M: MultiMillerLoop,
+        M::G1Affine: CurveAffine<ScalarExt = M::Fr, CurveExt = M::G1>,
         MOS: Clone + Debug,
     {
         type DecidingKey = KzgDecidingKey<M>;
@@ -103,7 +110,9 @@ mod evm {
     impl<M, MOS> AccumulationDecider<M::G1Affine, Rc<EvmLoader>> for KzgAs<M, MOS>
     where
         M: MultiMillerLoop,
-        M::Scalar: PrimeField<Repr = [u8; 0x20]>,
+        M::G1Affine: CurveAffine<ScalarExt = M::Fr, CurveExt = M::G1>,
+        M::G2Affine: CurveAffine<ScalarExt = M::Fr, CurveExt = M::G2>,
+        M::Fr: PrimeField<Repr = [u8; 0x20]>,
         MOS: Clone + Debug,
     {
         type DecidingKey = KzgDecidingKey<M>;
@@ -118,10 +127,10 @@ mod evm {
                 let x = coordinates.x().to_repr();
                 let y = coordinates.y().to_repr();
                 (
-                    U256::from_little_endian(&x.as_ref()[32..]),
-                    U256::from_little_endian(&x.as_ref()[..32]),
-                    U256::from_little_endian(&y.as_ref()[32..]),
-                    U256::from_little_endian(&y.as_ref()[..32]),
+                    U256::try_from_le_slice(&x.as_ref()[32..]).unwrap(),
+                    U256::try_from_le_slice(&x.as_ref()[..32]).unwrap(),
+                    U256::try_from_le_slice(&y.as_ref()[32..]).unwrap(),
+                    U256::try_from_le_slice(&y.as_ref()[..32]).unwrap(),
                 )
             });
             loader.pairing(&lhs, g2, &rhs, minus_s_g2);
@@ -152,7 +161,7 @@ mod evm {
                 loader.code_mut().runtime_append(code);
                 let challenge = loader.scalar(Value::Memory(challenge_ptr));
 
-                let powers_of_challenge = LoadedScalar::<M::Scalar>::powers(&challenge, lhs.len());
+                let powers_of_challenge = LoadedScalar::<M::Fr>::powers(&challenge, lhs.len());
                 let [lhs, rhs] = [lhs, rhs].map(|msms| {
                     msms.iter()
                         .zip(powers_of_challenge.iter())

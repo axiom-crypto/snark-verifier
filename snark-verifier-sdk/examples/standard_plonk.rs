@@ -1,21 +1,16 @@
-use ark_std::{end_timer, start_timer};
-use criterion::{criterion_group, criterion_main};
-use criterion::{BenchmarkId, Criterion};
+use std::path::Path;
+
 use halo2_base::gates::circuit::CircuitBuilderStage;
 use halo2_base::halo2_proofs;
 use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
-use halo2_proofs::{
-    halo2curves::bn256::Bn256,
-    poly::{commitment::Params, kzg::commitment::ParamsKZG},
-};
-use pprof::criterion::{Output, PProfProfiler};
+use halo2_proofs::{halo2curves::bn256::Bn256, poly::kzg::commitment::ParamsKZG};
 use rand::rngs::OsRng;
 use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
 use snark_verifier_sdk::halo2::aggregation::{AggregationConfigParams, VerifierUniversality};
 use snark_verifier_sdk::{
     gen_pk,
-    halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk},
+    halo2::{aggregation::AggregationCircuit, gen_snark_shplonk},
     Snark,
 };
 use snark_verifier_sdk::{CircuitExt, SHPLONK};
@@ -178,78 +173,44 @@ fn gen_application_snark(params: &ParamsKZG<Bn256>) -> Snark {
     gen_snark_shplonk(params, &pk, circuit, None::<&str>)
 }
 
-fn bench(c: &mut Criterion) {
-    let path = "./configs/example_evm_accumulator.json";
+fn main() {
     let params_app = gen_srs(8);
 
-    let snarks = [(); 3].map(|_| gen_application_snark(&params_app));
-    let agg_config = AggregationConfigParams::from_path(path);
-    let params = gen_srs(agg_config.degree);
+    let k = 21u32;
+    let lookup_bits = k as usize - 1;
+    let params = gen_srs(k);
+    let snarks = [(); 1].map(|_| gen_application_snark(&params_app));
 
-    let agg_circuit = AggregationCircuit::new::<SHPLONK>(
+    let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,
-        agg_config,
+        AggregationConfigParams { degree: k, lookup_bits, ..Default::default() },
         &params,
         snarks.clone(),
-        VerifierUniversality::None,
+        VerifierUniversality::Full,
     );
+    let agg_config = agg_circuit.calculate_params(Some(10));
 
-    let start0 = start_timer!(|| "gen vk & pk");
     let pk = gen_pk(&params, &agg_circuit, None);
-    end_timer!(start0);
     let break_points = agg_circuit.break_points();
     drop(agg_circuit);
 
-    let mut group = c.benchmark_group("plonk-prover");
-    group.sample_size(10);
-    group.bench_with_input(
-        BenchmarkId::new("standard-plonk-agg", params.k()),
-        &(&params, &pk, &break_points, &snarks),
-        |b, &(params, pk, break_points, snarks)| {
-            b.iter(|| {
-                let agg_circuit = AggregationCircuit::new::<SHPLONK>(
-                    CircuitBuilderStage::Prover,
-                    agg_config,
-                    params,
-                    snarks.clone(),
-                    VerifierUniversality::None,
-                )
-                .use_break_points(break_points.clone());
-                let instances = agg_circuit.instances();
-                gen_proof_shplonk(params, pk, agg_circuit, instances, None)
-            })
-        },
+    let agg_circuit = AggregationCircuit::new::<SHPLONK>(
+        CircuitBuilderStage::Prover,
+        agg_config,
+        &params,
+        snarks.clone(),
+        VerifierUniversality::Full,
+    )
+    .use_break_points(break_points);
+    let num_instances = agg_circuit.num_instance();
+    let instances = agg_circuit.instances();
+    let proof = gen_evm_proof_shplonk(&params, &pk, agg_circuit, instances.clone());
+
+    let deployment_code = gen_evm_verifier_shplonk::<AggregationCircuit>(
+        &params,
+        pk.get_vk(),
+        num_instances,
+        Some(Path::new("examples/StandardPlonkVerifier.sol")),
     );
-    group.finish();
-
-    #[cfg(feature = "loader_evm")]
-    {
-        // do one more time to verify
-        let agg_circuit = AggregationCircuit::new::<SHPLONK>(
-            CircuitBuilderStage::Prover,
-            agg_config,
-            &params,
-            snarks.clone(),
-            VerifierUniversality::None,
-        )
-        .use_break_points(break_points);
-        let num_instances = agg_circuit.num_instance();
-        let instances = agg_circuit.instances();
-        let proof = gen_evm_proof_shplonk(&params, &pk, agg_circuit, instances.clone());
-
-        let deployment_code = gen_evm_verifier_shplonk::<AggregationCircuit>(
-            &params,
-            pk.get_vk(),
-            num_instances,
-            None,
-        );
-        evm_verify(deployment_code, instances, proof);
-    }
+    evm_verify(deployment_code, instances, proof);
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(10, Output::Flamegraph(None)));
-    targets = bench
-}
-criterion_main!(benches);

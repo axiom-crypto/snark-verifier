@@ -2,6 +2,7 @@ use super::{read_instances, write_instances, CircuitExt, PlonkSuccinctVerifier, 
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
+pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
 use halo2_proofs::{
     circuit::Layouter,
     halo2curves::{
@@ -26,7 +27,6 @@ use halo2_proofs::{
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use rand::{rngs::StdRng, SeedableRng};
-pub use snark_verifier::util::hash::OptimizedPoseidonSpec;
 use snark_verifier::{
     cost::CostEstimation,
     loader::native::NativeLoader,
@@ -35,6 +35,7 @@ use snark_verifier::{
         AccumulationScheme, PolynomialCommitmentScheme, Query,
     },
     system::halo2::{compile, Config},
+    util::arithmetic::Rotation,
     util::transcript::TranscriptWrite,
     verifier::plonk::PlonkProof,
 };
@@ -122,20 +123,25 @@ where
     end_timer!(proof_time);
 
     // validate proof before caching
-    assert!({
-        let mut transcript_read =
-            PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(&proof[..], POSEIDON_SPEC.clone());
-        VerificationStrategy::<_, V>::finalize(
-            verify_proof::<_, V, _, _, _>(
-                params.verifier_params(),
-                pk.get_vk(),
-                AccumulatorStrategy::new(params.verifier_params()),
-                &[instances.as_slice()],
-                &mut transcript_read,
+    assert!(
+        {
+            let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(
+                &proof[..],
+                POSEIDON_SPEC.clone(),
+            );
+            VerificationStrategy::<_, V>::finalize(
+                verify_proof::<_, V, _, _, _>(
+                    params.verifier_params(),
+                    pk.get_vk(),
+                    AccumulatorStrategy::new(params.verifier_params()),
+                    &[instances.as_slice()],
+                    &mut transcript_read,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        )
-    });
+        },
+        "SNARK proof failed to verify"
+    );
 
     if let Some((instance_path, proof_path)) = path {
         write_instances(&instances, instance_path);
@@ -286,7 +292,7 @@ where
             NativeLoader,
             Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
             VerifyingKey = KzgAsVerifyingKey,
-        > + CostEstimation<G1Affine, Input = Vec<Query<Fr>>>,
+        > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>,
 {
     struct CsProxy<F, C>(PhantomData<(F, C)>);
 

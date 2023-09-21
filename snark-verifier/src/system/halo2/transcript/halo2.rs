@@ -1,6 +1,7 @@
 //! Transcript for verifier in [`halo2_proofs`] circuit.
 
 use crate::halo2_proofs;
+use crate::util::arithmetic::FieldExt;
 use crate::{
     loader::{
         halo2::{EcPoint, EccInstructions, Halo2Loader, Scalar},
@@ -64,7 +65,10 @@ where
 {
     /// Initialize [`PoseidonTranscript`] given readable or writeable stream for
     /// verifying or proving with [`NativeLoader`].
-    pub fn new<const SECURE_MDS: usize>(loader: &Rc<Halo2Loader<C, EccChip>>, stream: R) -> Self {
+    pub fn new<const SECURE_MDS: usize>(loader: &Rc<Halo2Loader<C, EccChip>>, stream: R) -> Self
+    where
+        C::Scalar: FieldExt,
+    {
         let buf = Poseidon::new::<R_F, R_P, SECURE_MDS>(loader);
         Self { loader: loader.clone(), stream, buf }
     }
@@ -165,7 +169,10 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
 {
     /// Initialize [`PoseidonTranscript`] given readable or writeable stream for
     /// verifying or proving with [`NativeLoader`].
-    pub fn new<const SECURE_MDS: usize>(stream: S) -> Self {
+    pub fn new<const SECURE_MDS: usize>(stream: S) -> Self
+    where
+        C::Scalar: FieldExt,
+    {
         Self {
             loader: NativeLoader,
             stream,
@@ -375,6 +382,7 @@ impl<C, R, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize
     for PoseidonTranscript<C, NativeLoader, R, T, RATE, R_F, R_P>
 where
     C: CurveAffine,
+    C::Scalar: FieldExt,
     R: Read,
 {
     fn init(reader: R) -> Self {
@@ -409,6 +417,7 @@ impl<C, W, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize
     for PoseidonTranscript<C, NativeLoader, W, T, RATE, R_F, R_P>
 where
     C: CurveAffine,
+    C::Scalar: FieldExt,
     W: Write,
 {
     fn init(writer: W) -> Self {
@@ -423,12 +432,13 @@ where
 mod halo2_lib {
     use crate::halo2_curves::CurveAffineExt;
     use crate::system::halo2::transcript::halo2::NativeEncoding;
-    use halo2_ecc::{ecc::BaseFieldEccChip, fields::PrimeField};
+    use halo2_base::utils::BigPrimeField;
+    use halo2_ecc::ecc::BaseFieldEccChip;
 
     impl<'chip, C: CurveAffineExt> NativeEncoding<C> for BaseFieldEccChip<'chip, C>
     where
-        C::Scalar: PrimeField,
-        C::Base: PrimeField,
+        C::Scalar: BigPrimeField,
+        C::Base: BigPrimeField,
     {
         fn encode(
             &self,

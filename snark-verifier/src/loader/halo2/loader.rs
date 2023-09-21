@@ -136,15 +136,15 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> Halo2Loader<C, EccChip> {
             | (Value::Constant(constant), Value::Assigned(assigned)) => {
                 Value::Assigned(self.scalar_chip().sum_with_coeff_and_const(
                     &mut self.ctx_mut(),
-                    &[(C::Scalar::one(), assigned)],
+                    &[(C::Scalar::ONE, assigned)],
                     *constant,
                 ))
             }
             (Value::Assigned(lhs), Value::Assigned(rhs)) => {
                 Value::Assigned(self.scalar_chip().sum_with_coeff_and_const(
                     &mut self.ctx_mut(),
-                    &[(C::Scalar::one(), lhs), (C::Scalar::one(), rhs)],
-                    C::Scalar::zero(),
+                    &[(C::Scalar::ONE, lhs), (C::Scalar::ONE, rhs)],
+                    C::Scalar::ZERO,
                 ))
             }
         };
@@ -161,14 +161,14 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> Halo2Loader<C, EccChip> {
             (Value::Constant(constant), Value::Assigned(assigned)) => {
                 Value::Assigned(self.scalar_chip().sum_with_coeff_and_const(
                     &mut self.ctx_mut(),
-                    &[(-C::Scalar::one(), assigned)],
+                    &[(-C::Scalar::ONE, assigned)],
                     *constant,
                 ))
             }
             (Value::Assigned(assigned), Value::Constant(constant)) => {
                 Value::Assigned(self.scalar_chip().sum_with_coeff_and_const(
                     &mut self.ctx_mut(),
-                    &[(C::Scalar::one(), assigned)],
+                    &[(C::Scalar::ONE, assigned)],
                     -*constant,
                 ))
             }
@@ -191,14 +191,14 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> Halo2Loader<C, EccChip> {
                 Value::Assigned(self.scalar_chip().sum_with_coeff_and_const(
                     &mut self.ctx_mut(),
                     &[(*constant, assigned)],
-                    C::Scalar::zero(),
+                    C::Scalar::ZERO,
                 ))
             }
             (Value::Assigned(lhs), Value::Assigned(rhs)) => {
                 Value::Assigned(self.scalar_chip().sum_products_with_coeff_and_const(
                     &mut self.ctx_mut(),
-                    &[(C::Scalar::one(), lhs, rhs)],
-                    C::Scalar::zero(),
+                    &[(C::Scalar::ONE, lhs, rhs)],
+                    C::Scalar::ZERO,
                 ))
             }
         };
@@ -305,6 +305,14 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> LoadedScalar<C::Scalar> for Sc
 
     fn loader(&self) -> &Self::Loader {
         &self.loader
+    }
+
+    fn pow_var(&self, exp: &Self, max_bits: usize) -> Self {
+        let loader = self.loader();
+        let base = self.clone().into_assigned();
+        let exp = exp.clone().into_assigned();
+        let res = loader.scalar_chip().pow_var(&mut loader.ctx_mut(), &base, &exp, max_bits);
+        loader.scalar_from_assigned(res)
     }
 }
 
@@ -557,7 +565,7 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> EcPointLoader<C> for Rc<Halo2L
                             fixed_base.push((scalar, *base))
                         }
                         (Value::Constant(scalar), Value::Assigned(_))
-                            if scalar.eq(&C::Scalar::one()) =>
+                            if scalar.eq(&C::Scalar::ONE) =>
                         {
                             variable_base_non_scaled.push(base);
                         }

@@ -24,11 +24,14 @@ jobs:
           cache-on-failure: true
 
       - name: Install solc
-        run: (hash svm 2>/dev/null || cargo install svm-rs) && svm install 0.8.17 && solc --version
+        run: (hash svm 2>/dev/null || cargo install --version 0.2.23 svm-rs) && svm install 0.8.20 && solc --version
 
       - name: Run test
         run: cargo test --all -- --nocapture
 
+      - name: Run example
+        working-directory: "snark-verifier-sdk"
+        run: cargo run --example standard_plonk
 
   lint:
     name: Lint
@@ -46,9 +49,6 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           cache-on-failure: true
-
-      - name: Run fmt
-        run: cargo fmt --all -- --check
 
       - name: Run clippy
         run: cargo clippy --all --all-targets -- -D warnings

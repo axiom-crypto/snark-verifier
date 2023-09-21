@@ -59,7 +59,6 @@ mod native {
 
             let [lhs_x, lhs_y, rhs_x, rhs_y]: [_; 4] = limbs
                 .chunks(LIMBS)
-                .into_iter()
                 .map(|limbs| {
                     fe_from_limbs::<_, _, LIMBS, BITS>(
                         limbs.iter().map(|limb| **limb).collect_vec().try_into().unwrap(),
@@ -109,7 +108,6 @@ mod evm {
 
             let [lhs_x, lhs_y, rhs_x, rhs_y]: [[_; LIMBS]; 4] = limbs
                 .chunks(LIMBS)
-                .into_iter()
                 .map(|limbs| limbs.to_vec().try_into().unwrap())
                 .collect_vec()
                 .try_into()
@@ -204,14 +202,15 @@ mod halo2 {
     mod halo2_lib {
         use super::*;
         use halo2_base::halo2_proofs::halo2curves::CurveAffineExt;
-        use halo2_ecc::{ecc::BaseFieldEccChip, fields::PrimeField};
+        use halo2_base::utils::BigPrimeField;
+        use halo2_ecc::ecc::BaseFieldEccChip;
 
         impl<'chip, C, const LIMBS: usize, const BITS: usize>
             LimbsEncodingInstructions<C, LIMBS, BITS> for BaseFieldEccChip<'chip, C>
         where
             C: CurveAffineExt,
-            C::ScalarExt: PrimeField,
-            C::Base: PrimeField,
+            C::ScalarExt: BigPrimeField,
+            C::Base: BigPrimeField,
         {
             fn assign_ec_point_from_limbs(
                 &self,
@@ -221,7 +220,7 @@ mod halo2 {
                 assert_eq!(limbs.len(), 2 * LIMBS);
 
                 let ec_point = self.assign_point::<C>(
-                    ctx.main(0),
+                    ctx.main(),
                     ec_point_from_limbs::<_, LIMBS, BITS>(
                         &limbs.iter().map(|limb| limb.value()).collect_vec(),
                     ),
@@ -231,7 +230,7 @@ mod halo2 {
                     .iter()
                     .zip_eq(iter::empty().chain(ec_point.x().limbs()).chain(ec_point.y().limbs()))
                 {
-                    ctx.main(0).constrain_equal(src, dst);
+                    ctx.main().constrain_equal(src, dst);
                 }
 
                 ec_point

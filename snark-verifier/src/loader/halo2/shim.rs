@@ -1,8 +1,8 @@
-use crate::util::arithmetic::{CurveAffine, FieldExt};
+use crate::util::arithmetic::{CurveAffine, PrimeField};
 use std::{fmt::Debug, ops::Deref};
 
 /// Instructions to handle field element operations.
-pub trait IntegerInstructions<F: FieldExt>: Clone + Debug {
+pub trait IntegerInstructions<F: PrimeField>: Clone + Debug {
     /// Context (either enhanced `region` or some kind of builder).
     type Context: Debug;
     /// Assigned cell.
@@ -24,8 +24,8 @@ pub trait IntegerInstructions<F: FieldExt>: Clone + Debug {
     fn sum_with_coeff_and_const(
         &self,
         ctx: &mut Self::Context,
-        values: &[(F::Scalar, impl Deref<Target = Self::AssignedInteger>)],
-        constant: F::Scalar,
+        values: &[(F, impl Deref<Target = Self::AssignedInteger>)],
+        constant: F,
     ) -> Self::AssignedInteger;
 
     /// Sum product of integers with coefficients and constant.
@@ -33,11 +33,11 @@ pub trait IntegerInstructions<F: FieldExt>: Clone + Debug {
         &self,
         ctx: &mut Self::Context,
         values: &[(
-            F::Scalar,
+            F,
             impl Deref<Target = Self::AssignedInteger>,
             impl Deref<Target = Self::AssignedInteger>,
         )],
-        constant: F::Scalar,
+        constant: F,
     ) -> Self::AssignedInteger;
 
     /// Returns `lhs - rhs`.
@@ -65,6 +65,15 @@ pub trait IntegerInstructions<F: FieldExt>: Clone + Debug {
         lhs: &Self::AssignedInteger,
         rhs: &Self::AssignedInteger,
     );
+
+    /// Returns `base^exponent` and constrains that `exponent` has at most `max_bits` bits.
+    fn pow_var(
+        &self,
+        ctx: &mut Self::Context,
+        base: &Self::AssignedInteger,
+        exponent: &Self::AssignedInteger,
+        max_bits: usize,
+    ) -> Self::AssignedInteger;
 }
 
 /// Instructions to handle elliptic curve point operations.
@@ -132,68 +141,70 @@ mod halo2_lib {
     use crate::halo2_proofs::halo2curves::CurveAffineExt;
     use crate::{
         loader::halo2::{EccInstructions, IntegerInstructions},
-        util::arithmetic::CurveAffine,
+        util::arithmetic::{CurveAffine, PrimeField},
     };
+    use halo2_base::gates::flex_gate::threads::SinglePhaseCoreManager;
     use halo2_base::{
         self,
-        gates::{builder::GateThreadBuilder, GateChip, GateInstructions, RangeInstructions},
+        gates::{GateChip, GateInstructions, RangeInstructions},
+        utils::BigPrimeField,
         AssignedValue,
         QuantumCell::{Constant, Existing},
     };
     use halo2_ecc::bigint::ProperCrtUint;
     use halo2_ecc::{
         ecc::{BaseFieldEccChip, EcPoint},
-        fields::{FieldChip, PrimeField},
+        fields::FieldChip,
     };
     use std::ops::Deref;
 
     type AssignedInteger<C> = ProperCrtUint<<C as CurveAffine>::ScalarExt>;
     type AssignedEcPoint<C> = EcPoint<<C as CurveAffine>::ScalarExt, AssignedInteger<C>>;
 
-    impl<F: PrimeField> IntegerInstructions<F> for GateChip<F> {
-        type Context = GateThreadBuilder<F>;
+    impl<F: BigPrimeField> IntegerInstructions<F> for GateChip<F> {
+        type Context = SinglePhaseCoreManager<F>;
         type AssignedCell = AssignedValue<F>;
         type AssignedInteger = AssignedValue<F>;
 
         fn assign_integer(&self, ctx: &mut Self::Context, integer: F) -> Self::AssignedInteger {
-            ctx.main(0).load_witness(integer)
+            ctx.main().load_witness(integer)
         }
 
         fn assign_constant(&self, ctx: &mut Self::Context, integer: F) -> Self::AssignedInteger {
-            ctx.main(0).load_constant(integer)
+            ctx.main().load_constant(integer)
         }
 
         fn sum_with_coeff_and_const(
             &self,
             ctx: &mut Self::Context,
-            values: &[(F::Scalar, impl Deref<Target = Self::AssignedInteger>)],
+            values: &[(F, impl Deref<Target = Self::AssignedInteger>)],
             constant: F,
         ) -> Self::AssignedInteger {
             let mut a = Vec::with_capacity(values.len() + 1);
             let mut b = Vec::with_capacity(values.len() + 1);
-            if constant != F::zero() {
+            if constant != F::ZERO {
                 a.push(Constant(constant));
-                b.push(Constant(F::one()));
+                b.push(Constant(F::ONE));
             }
             a.extend(values.iter().map(|(_, a)| Existing(*a.deref())));
             b.extend(values.iter().map(|(c, _)| Constant(*c)));
-            self.inner_product(ctx.main(0), a, b)
+            self.inner_product(ctx.main(), a, b)
         }
 
         fn sum_products_with_coeff_and_const(
             &self,
             ctx: &mut Self::Context,
             values: &[(
-                F::Scalar,
+                F,
                 impl Deref<Target = Self::AssignedInteger>,
                 impl Deref<Target = Self::AssignedInteger>,
             )],
             constant: F,
         ) -> Self::AssignedInteger {
             match values.len() {
-                0 => ctx.main(0).load_constant(constant),
+                0 => ctx.main().load_constant(constant),
                 _ => self.sum_products_with_coeff_and_var(
-                    ctx.main(0),
+                    ctx.main(),
                     values.iter().map(|(c, a, b)| (*c, Existing(*a.deref()), Existing(*b.deref()))),
                     Constant(constant),
                 ),
@@ -206,11 +217,11 @@ mod halo2_lib {
             a: &Self::AssignedInteger,
             b: &Self::AssignedInteger,
         ) -> Self::AssignedInteger {
-            GateInstructions::sub(self, ctx.main(0), Existing(*a), Existing(*b))
+            GateInstructions::sub(self, ctx.main(), Existing(*a), Existing(*b))
         }
 
         fn neg(&self, ctx: &mut Self::Context, a: &Self::AssignedInteger) -> Self::AssignedInteger {
-            GateInstructions::neg(self, ctx.main(0), Existing(*a))
+            GateInstructions::neg(self, ctx.main(), Existing(*a))
         }
 
         fn invert(
@@ -219,9 +230,9 @@ mod halo2_lib {
             a: &Self::AssignedInteger,
         ) -> Self::AssignedInteger {
             // make sure scalar != 0
-            let is_zero = self.is_zero(ctx.main(0), *a);
-            self.assert_is_const(ctx.main(0), &is_zero, &F::zero());
-            GateInstructions::div_unsafe(self, ctx.main(0), Constant(F::one()), Existing(*a))
+            let is_zero = self.is_zero(ctx.main(), *a);
+            self.assert_is_const(ctx.main(), &is_zero, &F::ZERO);
+            GateInstructions::div_unsafe(self, ctx.main(), Constant(F::ONE), Existing(*a))
         }
 
         fn assert_equal(
@@ -230,16 +241,26 @@ mod halo2_lib {
             a: &Self::AssignedInteger,
             b: &Self::AssignedInteger,
         ) {
-            ctx.main(0).constrain_equal(a, b);
+            ctx.main().constrain_equal(a, b);
+        }
+
+        fn pow_var(
+            &self,
+            ctx: &mut Self::Context,
+            base: &Self::AssignedInteger,
+            exponent: &Self::AssignedInteger,
+            max_bits: usize,
+        ) -> Self::AssignedInteger {
+            GateInstructions::pow_var(self, ctx.main(), *base, *exponent, max_bits)
         }
     }
 
     impl<'chip, C: CurveAffineExt> EccInstructions<C> for BaseFieldEccChip<'chip, C>
     where
-        C::ScalarExt: PrimeField,
-        C::Base: PrimeField,
+        C::ScalarExt: BigPrimeField,
+        C::Base: BigPrimeField,
     {
-        type Context = GateThreadBuilder<C::Scalar>;
+        type Context = SinglePhaseCoreManager<C::Scalar>;
         type ScalarChip = GateChip<C::Scalar>;
         type AssignedCell = AssignedValue<C::Scalar>;
         type AssignedScalar = AssignedValue<C::Scalar>;
@@ -250,11 +271,11 @@ mod halo2_lib {
         }
 
         fn assign_constant(&self, ctx: &mut Self::Context, point: C) -> Self::AssignedEcPoint {
-            self.assign_constant_point(ctx.main(0), point)
+            self.assign_constant_point(ctx.main(), point)
         }
 
         fn assign_point(&self, ctx: &mut Self::Context, point: C) -> Self::AssignedEcPoint {
-            self.assign_point(ctx.main(0), point)
+            self.assign_point(ctx.main(), point)
         }
 
         fn sum_with_const(
@@ -270,7 +291,7 @@ mod halo2_lib {
                 Some(constant)
             };
             self.sum::<C>(
-                ctx.main(0),
+                ctx.main(),
                 constant.into_iter().chain(values.iter().map(|v| v.deref().clone())),
             )
         }
@@ -326,7 +347,7 @@ mod halo2_lib {
             a: &Self::AssignedEcPoint,
             b: &Self::AssignedEcPoint,
         ) {
-            self.assert_equal(ctx.main(0), a.clone(), b.clone());
+            self.assert_equal(ctx.main(), a.clone(), b.clone());
         }
     }
 }

@@ -21,7 +21,7 @@ use halo2_proofs::{
 use itertools::Itertools;
 use rand::{rngs::OsRng, RngCore};
 use snark_verifier::{
-    loader::evm::{self, encode_calldata, Address, EvmLoader, ExecutorBuilder},
+    loader::evm::{self, deploy_and_call, encode_calldata, EvmLoader},
     pcs::kzg::{Gwc19, KzgAs},
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, SnarkVerifier},
@@ -237,23 +237,13 @@ fn gen_evm_verifier(
     let proof = PlonkVerifier::read_proof(&vk, &protocol, &instances, &mut transcript).unwrap();
     PlonkVerifier::verify(&vk, &protocol, &instances, &proof).unwrap();
 
-    evm::compile_yul(&loader.yul_code())
+    evm::compile_solidity(&loader.solidity_code())
 }
 
 fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
     let calldata = encode_calldata(&instances, &proof);
-    let success = {
-        let mut evm = ExecutorBuilder::default().with_gas_limit(u64::MAX.into()).build();
-
-        let caller = Address::from_low_u64_be(0xfe);
-        let verifier = evm.deploy(caller, deployment_code.into(), 0.into()).address.unwrap();
-        let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
-
-        dbg!(result.gas_used);
-
-        !result.reverted
-    };
-    assert!(success);
+    let gas_cost = deploy_and_call(deployment_code, calldata).unwrap();
+    dbg!(gas_cost);
 }
 
 fn main() {
