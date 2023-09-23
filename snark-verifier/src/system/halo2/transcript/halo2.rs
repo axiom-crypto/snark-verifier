@@ -35,6 +35,19 @@ where
     ) -> Result<Vec<Self::AssignedScalar>, Error>;
 }
 
+/// A way to keep track of what gets read in the transcript.
+#[derive(Clone, Debug)]
+pub enum TranscriptObject<C, L>
+where
+    C: CurveAffine,
+    L: Loader<C>,
+{
+    /// Scalar
+    Scalar(L::LoadedScalar),
+    /// Elliptic curve point
+    EcPoint(L::LoadedEcPoint),
+}
+
 #[derive(Debug)]
 /// Transcript for verifier in [`halo2_proofs`] circuit using poseidon hasher.
 /// Currently It assumes the elliptic curve scalar field is same as native
@@ -53,6 +66,10 @@ pub struct PoseidonTranscript<
 {
     loader: L,
     stream: S,
+    /// Only relevant for Halo2 loader: as elements from `stream` are read, they are assigned as witnesses.
+    /// The loaded witnesses are pushed to `loaded_stream`. This way at the end we have the entire proof transcript
+    /// as loaded witnesses.
+    pub loaded_stream: Vec<TranscriptObject<C, L>>,
     buf: Poseidon<C::Scalar, <L as ScalarLoader<C::Scalar>>::LoadedScalar, T, RATE>,
 }
 
@@ -70,7 +87,7 @@ where
         C::Scalar: FieldExt,
     {
         let buf = Poseidon::new::<R_F, R_P, SECURE_MDS>(loader);
-        Self { loader: loader.clone(), stream, buf }
+        Self { loader: loader.clone(), stream, buf, loaded_stream: vec![] }
     }
 
     /// Initialize [`PoseidonTranscript`] from a precomputed spec of round constants and MDS matrix because computing the constants is expensive.
@@ -80,12 +97,13 @@ where
         spec: OptimizedPoseidonSpec<C::Scalar, T, RATE>,
     ) -> Self {
         let buf = Poseidon::from_spec(loader, spec);
-        Self { loader: loader.clone(), stream, buf }
+        Self { loader: loader.clone(), stream, buf, loaded_stream: vec![] }
     }
 
     /// Clear the buffer and set the stream to a new one. Effectively the same as starting from a new transcript.
     pub fn new_stream(&mut self, stream: R) {
         self.buf.clear();
+        self.loaded_stream.clear();
         self.stream = stream;
     }
 }
@@ -148,6 +166,7 @@ where
             C::Scalar::from_repr(data).unwrap()
         };
         let scalar = self.loader.assign_scalar(scalar);
+        self.loaded_stream.push(TranscriptObject::Scalar(scalar.clone()));
         self.common_scalar(&scalar)?;
         Ok(scalar)
     }
@@ -159,6 +178,7 @@ where
             C::from_bytes(&compressed).unwrap()
         };
         let ec_point = self.loader.assign_ec_point(ec_point);
+        self.loaded_stream.push(TranscriptObject::EcPoint(ec_point.clone()));
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)
     }
@@ -177,17 +197,24 @@ impl<C: CurveAffine, S, const T: usize, const RATE: usize, const R_F: usize, con
             loader: NativeLoader,
             stream,
             buf: Poseidon::new::<R_F, R_P, SECURE_MDS>(&NativeLoader),
+            loaded_stream: vec![],
         }
     }
 
     /// Initialize [`PoseidonTranscript`] from a precomputed spec of round constants and MDS matrix because computing the constants is expensive.
     pub fn from_spec(stream: S, spec: OptimizedPoseidonSpec<C::Scalar, T, RATE>) -> Self {
-        Self { loader: NativeLoader, stream, buf: Poseidon::from_spec(&NativeLoader, spec) }
+        Self {
+            loader: NativeLoader,
+            stream,
+            buf: Poseidon::from_spec(&NativeLoader, spec),
+            loaded_stream: vec![],
+        }
     }
 
     /// Clear the buffer and set the stream to a new one. Effectively the same as starting from a new transcript.
     pub fn new_stream(&mut self, stream: S) {
         self.buf.clear();
+        self.loaded_stream.clear();
         self.stream = stream;
     }
 }
@@ -198,6 +225,7 @@ impl<C: CurveAffine, const T: usize, const RATE: usize, const R_F: usize, const 
     /// Clear the buffer and stream.
     pub fn clear(&mut self) {
         self.buf.clear();
+        self.loaded_stream.clear();
         self.stream.clear();
     }
 }
@@ -247,6 +275,7 @@ where
         let scalar = C::Scalar::from_repr_vartime(data).ok_or_else(|| {
             Error::Transcript(io::ErrorKind::Other, "Invalid scalar encoding in proof".to_string())
         })?;
+        self.loaded_stream.push(TranscriptObject::Scalar(scalar));
         self.common_scalar(&scalar)?;
         Ok(scalar)
     }
@@ -262,6 +291,7 @@ where
                 "Invalid elliptic curve point encoding in proof".to_string(),
             )
         })?;
+        self.loaded_stream.push(TranscriptObject::EcPoint(ec_point));
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)
     }

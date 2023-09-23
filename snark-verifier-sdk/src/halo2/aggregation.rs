@@ -33,6 +33,7 @@ use snark_verifier::{
         kzg::{KzgAccumulator, KzgAsProvingKey, KzgAsVerifyingKey, KzgSuccinctVerifyingKey},
         AccumulationScheme, AccumulationSchemeProver, PolynomialCommitmentScheme,
     },
+    system::halo2::transcript::halo2::TranscriptObject,
     verifier::SnarkVerifier,
 };
 use std::{fs::File, mem, path::Path, rc::Rc};
@@ -40,7 +41,6 @@ use std::{fs::File, mem, path::Path, rc::Rc};
 use super::{CircuitExt, PoseidonTranscript, Snark, POSEIDON_SPEC};
 
 pub type Svk = KzgSuccinctVerifyingKey<G1Affine>;
-type FieldPoint = ProperCrtUint<Fr>;
 pub type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
 pub type Halo2Loader<'chip> = loader::halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
 
@@ -58,8 +58,8 @@ pub struct SnarkAggregationWitness<'a> {
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
     pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
-    /// The proof transcript, as assigned [G1Affine] points, for each SNARK that was aggregated.
-    pub proofs: Vec<Vec<halo2_ecc::ecc::EcPoint<Fr, FieldPoint>>>,
+    /// The proof transcript, as loaded scalars and elliptic curve points, for each SNARK that was aggregated.
+    pub proof_transcripts: Vec<Vec<TranscriptObject<G1Affine, Rc<Halo2Loader<'a>>>>>,
 }
 
 /// Different possible stages of universality the aggregation circuit can support
@@ -136,7 +136,7 @@ where
     );
 
     let preprocessed_as_witness = universality.preprocessed_as_witness();
-    let (proofs, accumulators): (Vec<_>, Vec<_>) = snarks
+    let (proof_transcripts, accumulators): (Vec<_>, Vec<_>) = snarks
         .iter()
         .map(|snark: &Snark| {
             let protocol = if preprocessed_as_witness {
@@ -188,8 +188,18 @@ where
             previous_instances.push(
                 instances.into_iter().flatten().map(|scalar| scalar.into_assigned()).collect(),
             );
-            let proof = proof.witnesses.into_iter().map(|point| point.into_assigned()).collect();
-            (proof, accumulator)
+            let proof_transcript = transcript.loaded_stream.clone();
+            debug_assert_eq!(
+                snark.proof().len(),
+                proof_transcript
+                    .iter()
+                    .map(|t| match t {
+                        TranscriptObject::Scalar(_) => 32,
+                        TranscriptObject::EcPoint(_) => 32,
+                    })
+                    .sum::<usize>()
+            );
+            (proof_transcript, accumulator)
         })
         .unzip();
     let mut accumulators = accumulators.into_iter().flatten().collect_vec();
@@ -212,7 +222,7 @@ where
         previous_instances,
         accumulator,
         preprocessed: preprocessed_witnesses,
-        proofs,
+        proof_transcripts,
     }
 }
 
@@ -329,8 +339,15 @@ pub struct SnarkAggregationOutput {
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
     pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
-    /// The proof transcript, as assigned [G1Affine] points, for each SNARK that was aggregated.
-    pub proofs: Vec<Vec<halo2_ecc::ecc::EcPoint<Fr, FieldPoint>>>,
+    /// The proof transcript, as loaded scalars and elliptic curve points, for each SNARK that was aggregated.
+    pub proof_transcripts: Vec<Vec<AssignedTranscriptObject>>,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug)]
+pub enum AssignedTranscriptObject {
+    Scalar(AssignedValue<Fr>),
+    EcPoint(halo2_ecc::ecc::EcPoint<Fr, ProperCrtUint<Fr>>),
 }
 
 /// Given snarks, this populates the circuit builder with the virtual cells and constraints necessary to verify all the snarks.
@@ -404,8 +421,12 @@ where
     let loader = Halo2Loader::new(ecc_chip, tmp_pool);
 
     // run witness and copy constraint generation
-    let SnarkAggregationWitness { previous_instances, accumulator, preprocessed, proofs } =
-        aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
+    let SnarkAggregationWitness {
+        previous_instances,
+        accumulator,
+        preprocessed,
+        proof_transcripts,
+    } = aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
     let lhs = accumulator.lhs.assigned();
     let rhs = accumulator.rhs.assigned();
     let accumulator = lhs
@@ -417,6 +438,22 @@ where
         .chain(rhs.y().limbs().iter())
         .copied()
         .collect_vec();
+    let proof_transcripts = proof_transcripts
+        .into_iter()
+        .map(|transcript| {
+            transcript
+                .into_iter()
+                .map(|obj| match obj {
+                    TranscriptObject::Scalar(scalar) => {
+                        AssignedTranscriptObject::Scalar(scalar.into_assigned())
+                    }
+                    TranscriptObject::EcPoint(point) => {
+                        AssignedTranscriptObject::EcPoint(point.into_assigned())
+                    }
+                })
+                .collect()
+        })
+        .collect();
 
     #[cfg(debug_assertions)]
     {
@@ -429,7 +466,7 @@ where
     }
     // put back `pool` into `builder`
     *pool = loader.take_ctx();
-    SnarkAggregationOutput { previous_instances, accumulator, preprocessed, proofs }
+    SnarkAggregationOutput { previous_instances, accumulator, preprocessed, proof_transcripts }
 }
 
 impl AggregationCircuit {
