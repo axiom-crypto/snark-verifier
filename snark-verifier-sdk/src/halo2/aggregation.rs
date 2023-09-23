@@ -26,7 +26,7 @@ use snark_verifier::util::arithmetic::fe_to_limbs;
 use snark_verifier::{
     loader::{
         self,
-        halo2::halo2_ecc::{self, bn254::FpChip},
+        halo2::halo2_ecc::{self, bigint::ProperCrtUint, bn254::FpChip},
         native::NativeLoader,
     },
     pcs::{
@@ -40,6 +40,7 @@ use std::{fs::File, mem, path::Path, rc::Rc};
 use super::{CircuitExt, PoseidonTranscript, Snark, POSEIDON_SPEC};
 
 pub type Svk = KzgSuccinctVerifyingKey<G1Affine>;
+type FieldPoint = ProperCrtUint<Fr>;
 pub type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
 pub type Halo2Loader<'chip> = loader::halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
 
@@ -57,6 +58,8 @@ pub struct SnarkAggregationWitness<'a> {
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
     pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
+    /// The proof transcript, as assigned [G1Affine] points, for each SNARK that was aggregated.
+    pub proofs: Vec<Vec<halo2_ecc::ecc::EcPoint<Fr, FieldPoint>>>,
 }
 
 /// Different possible stages of universality the aggregation circuit can support
@@ -133,9 +136,9 @@ where
     );
 
     let preprocessed_as_witness = universality.preprocessed_as_witness();
-    let mut accumulators = snarks
+    let (proofs, accumulators): (Vec<_>, Vec<_>) = snarks
         .iter()
-        .flat_map(|snark: &Snark| {
+        .map(|snark: &Snark| {
             let protocol = if preprocessed_as_witness {
                 // always load `domain.n` as witness if vkey is witness
                 snark.protocol.loaded_preprocessed_as_witness(loader, universality.k_as_witness())
@@ -185,10 +188,11 @@ where
             previous_instances.push(
                 instances.into_iter().flatten().map(|scalar| scalar.into_assigned()).collect(),
             );
-
-            accumulator
+            let proof = proof.witnesses.into_iter().map(|point| point.into_assigned()).collect();
+            (proof, accumulator)
         })
-        .collect_vec();
+        .unzip();
+    let mut accumulators = accumulators.into_iter().flatten().collect_vec();
 
     let accumulator = if accumulators.len() > 1 {
         transcript.new_stream(as_proof);
@@ -208,6 +212,7 @@ where
         previous_instances,
         accumulator,
         preprocessed: preprocessed_witnesses,
+        proofs,
     }
 }
 
@@ -324,6 +329,8 @@ pub struct SnarkAggregationOutput {
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
     /// These can then be exposed as public instances.
     pub preprocessed: Vec<PreprocessedAndDomainAsWitness>,
+    /// The proof transcript, as assigned [G1Affine] points, for each SNARK that was aggregated.
+    pub proofs: Vec<Vec<halo2_ecc::ecc::EcPoint<Fr, FieldPoint>>>,
 }
 
 /// Given snarks, this populates the circuit builder with the virtual cells and constraints necessary to verify all the snarks.
@@ -397,7 +404,7 @@ where
     let loader = Halo2Loader::new(ecc_chip, tmp_pool);
 
     // run witness and copy constraint generation
-    let SnarkAggregationWitness { previous_instances, accumulator, preprocessed } =
+    let SnarkAggregationWitness { previous_instances, accumulator, preprocessed, proofs } =
         aggregate::<AS>(&svk, &loader, &snarks, as_proof.as_slice(), universality);
     let lhs = accumulator.lhs.assigned();
     let rhs = accumulator.rhs.assigned();
@@ -422,7 +429,7 @@ where
     }
     // put back `pool` into `builder`
     *pool = loader.take_ctx();
-    SnarkAggregationOutput { previous_instances, accumulator, preprocessed }
+    SnarkAggregationOutput { previous_instances, accumulator, preprocessed, proofs }
 }
 
 impl AggregationCircuit {
@@ -452,7 +459,7 @@ impl AggregationCircuit {
         let svk: Svk = params.get_g()[0].into();
         let mut builder = BaseCircuitBuilder::from_stage(stage).use_params(config_params.into());
         let range = builder.range_chip();
-        let SnarkAggregationOutput { previous_instances, accumulator, preprocessed } =
+        let SnarkAggregationOutput { previous_instances, accumulator, preprocessed, .. } =
             aggregate_snarks::<AS>(builder.pool(0), &range, svk, snarks, universality);
         assert_eq!(
             builder.assigned_instances.len(),
