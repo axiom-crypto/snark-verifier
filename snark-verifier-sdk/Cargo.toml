@@ -1,6 +1,6 @@
 [package]
 name = "snark-verifier-sdk"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
@@ -22,14 +22,10 @@ snark-verifier = { path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
 
 # loader_evm
-ethereum-types = { version = "0.14.1", default-features = false, features = [
-    "std",
-], optional = true }
+ethereum-types = { version = "0.14.1", default-features = false, features = ["std"], optional = true }
 
 # zkevm benchmarks
-zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = [
-    "test",
-], optional = true }
+zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = ["test"], optional = true }
 bus-mapping = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
 eth-types = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
 mock = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
@@ -45,13 +41,7 @@ crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
 
 [features]
-default = [
-    "loader_halo2",
-    "loader_evm",
-    "halo2-axiom",
-    "halo2-base/jemallocator",
-    "display",
-]
+default = ["loader_halo2", "loader_evm", "halo2-axiom", "halo2-base/jemallocator", "display"]
 display = ["snark-verifier/display", "dep:ark-std"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 loader_halo2 = ["snark-verifier/loader_halo2"]
