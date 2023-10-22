@@ -25,6 +25,8 @@ use std::{
     path::Path,
 };
 
+pub use snark_verifier;
+
 #[cfg(feature = "loader_evm")]
 pub mod evm;
 #[cfg(feature = "loader_halo2")]
