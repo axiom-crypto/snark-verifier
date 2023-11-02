@@ -15,7 +15,7 @@ serde = { version = "1.0", features = ["derive"] }
 pairing = { version = "0.23" }
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc0", default-features = false }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc", default-features = false }
 
 # parallel
 rayon = { version = "1.7", optional = true }
@@ -25,7 +25,7 @@ sha3 = { version = "0.10", optional = true }
 revm = { version = "3.3.0", optional = true }
 
 # loader_halo2
-halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc0", default-features = false, optional = true }
+halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc", default-features = false, optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
@@ -35,7 +35,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # loader_evm
 crossterm = { version = "0.25" }
-tui = { version = "0.19", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.24", default-features = false, features = ["crossterm"] }
 
 [features]
 default = ["loader_evm", "loader_halo2", "halo2-axiom", "display"]

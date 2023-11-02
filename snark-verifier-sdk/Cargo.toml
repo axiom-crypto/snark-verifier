@@ -17,7 +17,7 @@ serde_json = "1.0"
 serde_with = { version = "2.2", optional = true }
 bincode = "1.3.3"
 ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc0", default-features = false }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "release-0.4.0-rc", default-features = false }
 snark-verifier = { path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
 
@@ -27,22 +27,22 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
 ], optional = true }
 
 # zkevm benchmarks
-zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = [
-    "test",
-], optional = true }
-bus-mapping = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
-eth-types = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
-mock = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
+# zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = [
+#     "test",
+# ], optional = true }
+# bus-mapping = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
+# eth-types = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
+# mock = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
 paste = "1.0.7"
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
-criterion = "0.4"
+pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
+criterion = "0.5.1"
 criterion-macro = "0.4"
 # loader_evm
 crossterm = { version = "0.25" }
-tui = { version = "0.19", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.24", default-features = false, features = ["crossterm"] }
 
 [features]
 default = [
@@ -67,15 +67,15 @@ name = "standard_plonk"
 required-features = ["loader_halo2"]
 harness = false
 
-[[bench]]
-name = "zkevm"
-required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
-harness = false
+# [[bench]]
+# name = "zkevm"
+# required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
+# harness = false
 
-[[bench]]
-name = "zkevm_plus_state"
-required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
-harness = false
+# [[bench]]
+# name = "zkevm_plus_state"
+# required-features = ["loader_halo2", "loader_evm", "zkevm", "halo2-pse"]
+# harness = false
 
 [[bench]]
 name = "read_pk"
