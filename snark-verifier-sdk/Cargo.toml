@@ -2,6 +2,7 @@
 name = "snark-verifier-sdk"
 version = "0.1.6"
 edition = "2021"
+autobenches = false
 
 [dependencies]
 itertools = "0.10.5"
