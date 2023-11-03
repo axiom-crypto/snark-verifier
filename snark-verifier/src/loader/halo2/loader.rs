@@ -16,7 +16,7 @@ use std::{
     rc::Rc,
 };
 
-/// `Loader` implementation for generating verifier in [`halo2_proofs`] circuit.
+/// `Loader` implementation for generating verifier in [`halo2_proofs`](crate::halo2_proofs) circuit.
 #[derive(Debug)]
 pub struct Halo2Loader<C: CurveAffine, EccChip: EccInstructions<C>> {
     ecc_chip: RefCell<EccChip>,

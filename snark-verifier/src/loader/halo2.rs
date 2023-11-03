@@ -1,4 +1,4 @@
-//! `Loader` implementation for generating verifier in [`halo2_proofs`] circuit.
+//! `Loader` implementation for generating verifier in [`halo2_proofs`](crate::halo2_proofs) circuit.
 
 pub(crate) mod loader;
 mod shim;

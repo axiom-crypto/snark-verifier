@@ -21,7 +21,7 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-/// [`halo2_curves::pairing::MultiMillerLoop`] with [`std::fmt::Debug`].
+/// [pairing::MultiMillerLoop] with [`std::fmt::Debug`].
 pub trait MultiMillerLoop: pairing::MultiMillerLoop + Debug {}
 
 impl<M: pairing::MultiMillerLoop + Debug> MultiMillerLoop for M {}
