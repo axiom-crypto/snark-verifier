@@ -9,7 +9,7 @@ use std::{
 };
 
 pub use executor::deploy_and_call;
-pub use revm::primitives::ruint::aliases::{B160 as Address, B256, U256, U512};
+pub use ruint::aliases::{B160 as Address, B256, U256, U512};
 
 pub(crate) mod executor;
 
