@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - ["main", "release-*"]
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test assembly release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          override: false
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Install solc
+        run: (hash svm 2>/dev/null || cargo install --version 0.2.23 svm-rs) && svm install 0.8.19 && solc --version
+
+      - name: Run test
+        run: cargo test --all --features "revm, halo2-base/asm" -- --nocapture
+
+      - name: Run example
+        working-directory: "snark-verifier-sdk"
+        run: cargo run --example standard_plonk --features "revm, halo2-base/asm"
