@@ -5,7 +5,7 @@ edition = "2021"
 autobenches = false
 
 [dependencies]
-itertools = "0.10.5"
+itertools = "0.11"
 lazy_static = "1.4.0"
 num-bigint = "0.4.3"
 num-integer = "0.1.45"
@@ -23,7 +23,7 @@ snark-verifier = { path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
 
 # loader_evm
-ethereum-types = { version = "0.14.1", default-features = false, features = [
+ethereum-types = { version = "=0.14.1", default-features = false, features = [
     "std",
 ], optional = true }
 
@@ -54,8 +54,9 @@ default = [
     "display",
 ]
 display = ["snark-verifier/display", "dep:ark-std"]
-loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 loader_halo2 = ["snark-verifier/loader_halo2"]
+loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
+revm = ["snark-verifier/revm"]
 parallel = ["snark-verifier/parallel"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]

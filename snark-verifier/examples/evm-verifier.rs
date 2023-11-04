@@ -20,8 +20,10 @@ use halo2_proofs::{
 };
 use itertools::Itertools;
 use rand::{rngs::OsRng, RngCore};
+#[cfg(feature = "revm")]
+use snark_verifier::loader::evm::{deploy_and_call, encode_calldata};
 use snark_verifier::{
-    loader::evm::{self, deploy_and_call, encode_calldata, EvmLoader},
+    loader::evm::{self, EvmLoader},
     pcs::kzg::{Gwc19, KzgAs},
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, SnarkVerifier},
@@ -240,6 +242,7 @@ fn gen_evm_verifier(
     evm::compile_solidity(&loader.solidity_code())
 }
 
+#[cfg(feature = "revm")]
 fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
     let calldata = encode_calldata(&instances, &proof);
     let gas_cost = deploy_and_call(deployment_code, calldata).unwrap();
@@ -251,8 +254,9 @@ fn main() {
 
     let circuit = StandardPlonk::rand(OsRng);
     let pk = gen_pk(&params, &circuit);
-    let deployment_code = gen_evm_verifier(&params, pk.get_vk(), StandardPlonk::num_instance());
+    let _deployment_code = gen_evm_verifier(&params, pk.get_vk(), StandardPlonk::num_instance());
 
-    let proof = gen_proof(&params, &pk, circuit.clone(), circuit.instances());
-    evm_verify(deployment_code, circuit.instances(), proof);
+    let _proof = gen_proof(&params, &pk, circuit.clone(), circuit.instances());
+    #[cfg(feature = "revm")]
+    evm_verify(_deployment_code, circuit.instances(), _proof);
 }

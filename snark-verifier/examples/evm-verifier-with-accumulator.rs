@@ -21,9 +21,11 @@ use halo2_proofs::{
 };
 use itertools::Itertools;
 use rand::rngs::OsRng;
+#[cfg(feature = "revm")]
+use snark_verifier::loader::evm::{deploy_and_call, encode_calldata};
 use snark_verifier::{
     loader::{
-        evm::{self, deploy_and_call, encode_calldata, EvmLoader},
+        evm::{self, EvmLoader},
         native::NativeLoader,
     },
     pcs::kzg::{Gwc19, KzgAs, LimbsEncoding},
@@ -504,6 +506,7 @@ fn gen_aggregation_evm_verifier(
     evm::compile_solidity(&loader.solidity_code())
 }
 
+#[cfg(feature = "revm")]
 fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
     let calldata = encode_calldata(&instances, &proof);
     let gas_cost = deploy_and_call(deployment_code, calldata).unwrap();
@@ -546,7 +549,7 @@ fn main() {
 
     let params = gen_srs(agg_config.degree);
     let pk = gen_pk(&params, &agg_circuit.inner);
-    let deployment_code = gen_aggregation_evm_verifier(
+    let _deployment_code = gen_aggregation_evm_verifier(
         &params,
         pk.get_vk(),
         aggregation::AggregationCircuit::num_instance(),
@@ -564,11 +567,12 @@ fn main() {
         snarks,
     );
     let instances = agg_circuit.instances();
-    let proof = gen_proof::<_, _, EvmTranscript<G1Affine, _, _, _>, EvmTranscript<G1Affine, _, _, _>>(
-        &params,
-        &pk,
-        agg_circuit.inner,
-        instances.clone(),
-    );
-    evm_verify(deployment_code, instances, proof);
+    let _proof = gen_proof::<
+        _,
+        _,
+        EvmTranscript<G1Affine, _, _, _>,
+        EvmTranscript<G1Affine, _, _, _>,
+    >(&params, &pk, agg_circuit.inner, instances.clone());
+    #[cfg(feature = "revm")]
+    evm_verify(_deployment_code, instances, _proof);
 }

@@ -8,9 +8,11 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[cfg(feature = "revm")]
 pub use executor::deploy_and_call;
 pub use ruint::aliases::{B160 as Address, B256, U256, U512};
 
+#[cfg(feature = "revm")]
 pub(crate) mod executor;
 
 /// Memory chunk in EVM.

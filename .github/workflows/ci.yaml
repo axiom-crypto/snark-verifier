@@ -27,11 +27,11 @@ jobs:
         run: (hash svm 2>/dev/null || cargo install --version 0.2.23 svm-rs) && svm install 0.8.19 && solc --version
 
       - name: Run test
-        run: cargo test --all -- --nocapture
+        run: cargo test --all --features "revm" -- --nocapture
 
       - name: Run example
         working-directory: "snark-verifier-sdk"
-        run: cargo run --example standard_plonk
+        run: cargo run --example standard_plonk --features "revm"
 
   lint:
     name: Lint

@@ -6,7 +6,9 @@ use halo2_base::utils::fs::gen_srs;
 use halo2_proofs::halo2curves as halo2_curves;
 use halo2_proofs::{halo2curves::bn256::Bn256, poly::kzg::commitment::ParamsKZG};
 use rand::rngs::OsRng;
-use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
+#[cfg(feature = "revm")]
+use snark_verifier_sdk::evm::evm_verify;
+use snark_verifier_sdk::evm::{gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
 use snark_verifier_sdk::halo2::aggregation::{AggregationConfigParams, VerifierUniversality};
 use snark_verifier_sdk::{
     gen_pk,
@@ -204,13 +206,14 @@ fn main() {
     .use_break_points(break_points);
     let num_instances = agg_circuit.num_instance();
     let instances = agg_circuit.instances();
-    let proof = gen_evm_proof_shplonk(&params, &pk, agg_circuit, instances.clone());
+    let _proof = gen_evm_proof_shplonk(&params, &pk, agg_circuit, instances.clone());
 
-    let deployment_code = gen_evm_verifier_shplonk::<AggregationCircuit>(
+    let _deployment_code = gen_evm_verifier_shplonk::<AggregationCircuit>(
         &params,
         pk.get_vk(),
         num_instances,
         Some(Path::new("examples/StandardPlonkVerifier.sol")),
     );
-    evm_verify(deployment_code, instances, proof);
+    #[cfg(feature = "revm")]
+    evm_verify(_deployment_code, instances, _proof);
 }

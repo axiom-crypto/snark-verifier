@@ -22,7 +22,7 @@ use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 pub use snark_verifier::loader::evm::encode_calldata;
 use snark_verifier::{
-    loader::evm::{compile_solidity, deploy_and_call, EvmLoader},
+    loader::evm::{compile_solidity, EvmLoader},
     pcs::{
         kzg::{KzgAccumulator, KzgAsVerifyingKey, KzgDecidingKey, KzgSuccinctVerifyingKey},
         AccumulationDecider, AccumulationScheme, PolynomialCommitmentScheme,
@@ -174,9 +174,10 @@ pub fn gen_evm_verifier_shplonk<C: CircuitExt<Fr>>(
     gen_evm_verifier::<C, SHPLONK>(params, vk, num_instance, path)
 }
 
+#[cfg(feature = "revm")]
 pub fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
     let calldata = encode_calldata(&instances, &proof);
-    let gas_cost = deploy_and_call(deployment_code, calldata).unwrap();
+    let gas_cost = snark_verifier::deploy_and_call(deployment_code, calldata).unwrap();
     dbg!(gas_cost);
 }
 
