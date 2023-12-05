@@ -53,6 +53,10 @@ pub struct PreprocessedAndDomainAsWitness {
 
 #[derive(Clone, Debug)]
 pub struct SnarkAggregationWitness<'a> {
+    /// The (flattened) public instances from previous snarks that were aggregated, now collected as PRIVATE assigned values.
+    /// * If previous snark was from aggregation circuit, the previous instances will still contain the old KZG accumulator.
+    ///
+    /// The user can optionally append these private witnesses to `inner.assigned_instances` to expose them.
     pub previous_instances: Vec<Vec<AssignedValue<Fr>>>,
     pub accumulator: KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
     /// This returns the assigned `preprocessed` and `transcript_initial_state` values as a vector of assigned values, one for each aggregated snark.
@@ -295,8 +299,10 @@ impl TryFrom<BaseCircuitParams> for AggregationConfigParams {
 pub struct AggregationCircuit {
     /// Circuit builder consisting of virtual region managers
     pub builder: BaseCircuitBuilder<Fr>,
-    // the public instances from previous snarks that were aggregated, now collected as PRIVATE assigned values
-    // the user can optionally append these to `inner.assigned_instances` to expose them
+    /// The (flattened) public instances from previous snarks that were aggregated, now collected as PRIVATE assigned values.
+    /// * If previous snark was from aggregation circuit, the previous instances will still contain the old KZG accumulator.
+    ///
+    /// The user can optionally append these private witnesses to `inner.assigned_instances` to expose them.
     #[getset(get = "pub")]
     previous_instances: Vec<Vec<AssignedValue<Fr>>>,
     /// This returns the assigned `preprocessed_digest` (vkey), optional `transcript_initial_state`, `domain.n` (optional), and `omega` (optional) values as a vector of assigned values, one for each aggregated snark.
