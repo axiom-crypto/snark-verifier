@@ -182,6 +182,7 @@ fn main() {
     let lookup_bits = k as usize - 1;
     let params = gen_srs(k);
     let snarks = [(); 1].map(|_| gen_application_snark(&params_app));
+    dbg!(&snarks[0].protocol);
 
     let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,

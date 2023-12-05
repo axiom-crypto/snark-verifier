@@ -1135,20 +1135,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
+name = "halo2-axiom"
+version = "0.4.1"
+dependencies = [
+ "blake2b_simd",
+ "crossbeam",
+ "ff",
+ "group",
+ "halo2curves-axiom",
+ "itertools 0.11.0",
+ "maybe-rayon",
+ "pairing",
+ "rand",
+ "rand_core",
+ "rustc-hash",
+ "sha3 0.10.8",
+ "tracing",
+]
+
+[[package]]
 name = "halo2-base"
 version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=release-0.4.1-rc#a30e3b18d285c8b0d7145c1c34297edd9433df60"
 dependencies = [
  "getset",
- "halo2_proofs 0.2.0",
- "halo2_proofs 0.2.0 (git+https://github.com/privacy-scaling-explorations/halo2.git?rev=7a21656)",
+ "halo2-axiom",
+ "halo2_proofs",
  "itertools 0.11.0",
  "jemallocator",
  "log",
  "num-bigint",
  "num-integer",
  "num-traits",
- "poseidon-rs",
+ "poseidon-primitives",
  "rand_chacha",
  "rayon",
  "rustc-hash",
@@ -1159,7 +1177,6 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=release-0.4.1-rc#a30e3b18d285c8b0d7145c1c34297edd9433df60"
 dependencies = [
  "halo2-base",
  "itertools 0.10.5",
@@ -1178,30 +1195,12 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-dependencies = [
- "blake2b_simd",
- "crossbeam",
- "ff",
- "group",
- "halo2curves 0.4.0",
- "maybe-rayon",
- "pairing",
- "rand",
- "rand_core",
- "rustc-hash",
- "sha3 0.10.8",
- "tracing",
-]
-
-[[package]]
-name = "halo2_proofs"
-version = "0.2.0"
 source = "git+https://github.com/privacy-scaling-explorations/halo2.git?rev=7a21656#7a2165617195d8baa422ca7b2b364cef02380390"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2curves 0.1.0",
+ "halo2curves",
  "maybe-rayon",
  "rand_chacha",
  "rand_core",
@@ -1230,9 +1229,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "halo2curves"
-version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2curves.git?branch=main#e185711b6ba8f3e22f2af8bf24a5fc84b781ca46"
+name = "halo2curves-axiom"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d47eaec6a3040c2fbaa020716bf571b0c55025126242510f774183aff84b92e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -1910,9 +1910,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "poseidon-rs"
+name = "poseidon-primitives"
 version = "0.1.1"
-source = "git+https://github.com/axiom-crypto/poseidon-circuit.git?rev=1aee4a1#1aee4a1bf6220578924079aac4f2eee3874116a1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bd95570f7ea849b4187298b5bb229643e44e1d47ddf3979d0db8a1c28be26a8"
 dependencies = [
  "bitvec",
  "ff",

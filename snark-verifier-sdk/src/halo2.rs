@@ -279,9 +279,11 @@ pub fn gen_dummy_snark<ConcreteCircuit, AS>(
     params: &ParamsKZG<Bn256>,
     vk: Option<&VerifyingKey<G1Affine>>,
     num_instance: Vec<usize>,
+    circuit_params: ConcreteCircuit::Params,
 ) -> Snark
 where
     ConcreteCircuit: CircuitExt<Fr>,
+    ConcreteCircuit::Params: Clone,
     AS: PolynomialCommitmentScheme<
             G1Affine,
             NativeLoader,
@@ -294,18 +296,43 @@ where
             VerifyingKey = KzgAsVerifyingKey,
         > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>,
 {
-    struct CsProxy<F, C>(PhantomData<(F, C)>);
+    #[derive(Clone)]
+    struct CsProxy<F: Field, C: Circuit<F>> {
+        params: C::Params,
+        _marker: PhantomData<F>,
+    }
 
-    impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C> {
+    impl<F: Field, C: Circuit<F>> CsProxy<F, C> {
+        pub fn new(params: C::Params) -> Self {
+            Self { params, _marker: PhantomData }
+        }
+    }
+
+    impl<F: Field, C: CircuitExt<F>> Circuit<F> for CsProxy<F, C>
+    where
+        C::Params: Clone,
+    {
         type Config = C::Config;
         type FloorPlanner = C::FloorPlanner;
+        type Params = C::Params;
 
         fn without_witnesses(&self) -> Self {
-            CsProxy(PhantomData)
+            Self::new(self.params.clone())
         }
 
-        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            C::configure(meta)
+        fn params(&self) -> Self::Params {
+            self.params.clone()
+        }
+
+        fn configure_with_params(
+            meta: &mut ConstraintSystem<F>,
+            params: Self::Params,
+        ) -> Self::Config {
+            C::configure_with_params(meta, params)
+        }
+
+        fn configure(_: &mut ConstraintSystem<F>) -> Self::Config {
+            unreachable!("must use configure_with_params")
         }
 
         fn synthesize(
@@ -330,7 +357,7 @@ where
 
     let dummy_vk = vk
         .is_none()
-        .then(|| keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>(PhantomData)).unwrap());
+        .then(|| keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>::new(circuit_params)).unwrap());
     let protocol = compile(
         params,
         vk.or(dummy_vk.as_ref()).unwrap(),
