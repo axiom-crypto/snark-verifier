@@ -358,12 +358,46 @@ where
     let dummy_vk = vk
         .is_none()
         .then(|| keygen_vk(params, &CsProxy::<Fr, ConcreteCircuit>::new(circuit_params)).unwrap());
-    let protocol = compile(
+
+    gen_dummy_snark_from_vk::<AS>(
         params,
         vk.or(dummy_vk.as_ref()).unwrap(),
+        num_instance,
+        ConcreteCircuit::accumulator_indices(),
+    )
+}
+
+/// Creates a dummy snark in the correct shape corresponding to the given verifying key.
+/// This dummy snark will **not** verify.
+/// This snark can be used as a placeholder input into an aggregation circuit expecting a snark
+/// with this verifying key.
+///
+/// Note that this function does not need to know the concrete `Circuit` type.
+pub fn gen_dummy_snark_from_vk<AS>(
+    params: &ParamsKZG<Bn256>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    accumulator_indices: Option<Vec<(usize, usize)>>,
+) -> Snark
+where
+    AS: PolynomialCommitmentScheme<
+            G1Affine,
+            NativeLoader,
+            VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
+            Output = KzgAccumulator<G1Affine, NativeLoader>,
+        > + AccumulationScheme<
+            G1Affine,
+            NativeLoader,
+            Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
+            VerifyingKey = KzgAsVerifyingKey,
+        > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>,
+{
+    let protocol = compile(
+        params,
+        vk,
         Config::kzg()
             .with_num_instance(num_instance.clone())
-            .with_accumulator_indices(ConcreteCircuit::accumulator_indices()),
+            .with_accumulator_indices(accumulator_indices),
     );
     let instances = num_instance.into_iter().map(|n| vec![Fr::default(); n]).collect();
     let proof = {
