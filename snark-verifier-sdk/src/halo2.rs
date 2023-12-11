@@ -46,6 +46,7 @@ use std::{
 };
 
 pub mod aggregation;
+pub mod utils;
 
 // Poseidon parameters
 // We use the same ones Scroll uses for security: https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/bn256/fp.rs
