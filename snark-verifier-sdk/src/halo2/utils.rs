@@ -1,8 +1,5 @@
-use std::path::Path;
-
 use halo2_base::{
     halo2_proofs::{
-        arithmetic::Field,
         halo2curves::bn256::{Fr, G1Affine},
         plonk::{Circuit, VerifyingKey},
     },
