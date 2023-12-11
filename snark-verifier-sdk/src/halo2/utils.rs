@@ -79,3 +79,13 @@ pub trait KeygenAggregationCircuitIntent {
         self.build_keygen_circuit_from_snarks(snarks)
     }
 }
+
+impl<'a> From<&'a AggregationDependencyIntentOwned> for AggregationDependencyIntent<'a> {
+    fn from(intent: &'a AggregationDependencyIntentOwned) -> Self {
+        Self {
+            vk: &intent.vk,
+            num_instance: &intent.num_instance,
+            is_aggregation: intent.is_aggregation,
+        }
+    }
+}
