@@ -31,7 +31,7 @@ pub trait KeygenAggregationCircuitIntent {
     type AggregationCircuit: Circuit<Fr> = AggregationCircuit;
 
     /// The **ordered** list of [`VerifyingKey`]s of the circuits to be aggregated.
-    fn vk_of_dependencies(&self) -> Vec<AggregationDependencyIntent>;
+    fn intent_of_dependencies(&self) -> Vec<AggregationDependencyIntent>;
 
     /// Builds a _dummy_ instantiation of `Self::AggregationCircuit` for the purposes of key generation.
     /// Assumes that `snarks` is an ordered list of [`Snark`]s, where the `i`th snark corresponds to the `i`th [`VerifyingKey`] in `vk_of_dependencies`.
@@ -54,7 +54,7 @@ pub trait KeygenAggregationCircuitIntent {
         Self: Sized,
     {
         let snarks = self
-            .vk_of_dependencies()
+            .intent_of_dependencies()
             .into_iter()
             .map(|AggregationDependencyIntent { vk, num_instance, is_aggregation }| {
                 let k = vk.get_domain().k();
