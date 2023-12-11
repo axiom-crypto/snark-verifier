@@ -17,6 +17,13 @@ pub struct AggregationDependencyIntent<'a> {
     pub is_aggregation: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct AggregationDependencyIntentOwned {
+    pub vk: VerifyingKey<G1Affine>,
+    pub num_instance: Vec<usize>,
+    pub is_aggregation: bool,
+}
+
 /// This trait should be implemented on the minimal circuit configuration data necessary to
 /// completely determine an aggregation circuit
 /// (independent of circuit inputs or specific snarks to be aggregated).
