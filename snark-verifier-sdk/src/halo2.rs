@@ -37,7 +37,7 @@ use snark_verifier::{
     system::halo2::{compile, Config},
     util::arithmetic::Rotation,
     util::transcript::TranscriptWrite,
-    verifier::plonk::PlonkProof,
+    verifier::plonk::{PlonkProof, PlonkProtocol},
 };
 use std::{
     fs::{self, File},
@@ -275,6 +275,18 @@ pub fn read_snark(path: impl AsRef<Path>) -> Result<Snark, bincode::Error> {
     bincode::deserialize_from(f)
 }
 
+pub trait NativeKzgAccumulationScheme = PolynomialCommitmentScheme<
+        G1Affine,
+        NativeLoader,
+        VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
+        Output = KzgAccumulator<G1Affine, NativeLoader>,
+    > + AccumulationScheme<
+        G1Affine,
+        NativeLoader,
+        Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
+        VerifyingKey = KzgAsVerifyingKey,
+    > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>;
+
 // copied from snark_verifier --example recursion
 pub fn gen_dummy_snark<ConcreteCircuit, AS>(
     params: &ParamsKZG<Bn256>,
@@ -285,17 +297,7 @@ pub fn gen_dummy_snark<ConcreteCircuit, AS>(
 where
     ConcreteCircuit: CircuitExt<Fr>,
     ConcreteCircuit::Params: Clone,
-    AS: PolynomialCommitmentScheme<
-            G1Affine,
-            NativeLoader,
-            VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
-            Output = KzgAccumulator<G1Affine, NativeLoader>,
-        > + AccumulationScheme<
-            G1Affine,
-            NativeLoader,
-            Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
-            VerifyingKey = KzgAsVerifyingKey,
-        > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>,
+    AS: NativeKzgAccumulationScheme,
 {
     #[derive(Clone)]
     struct CsProxy<F: Field, C: Circuit<F>> {
@@ -381,17 +383,7 @@ pub fn gen_dummy_snark_from_vk<AS>(
     accumulator_indices: Option<Vec<(usize, usize)>>,
 ) -> Snark
 where
-    AS: PolynomialCommitmentScheme<
-            G1Affine,
-            NativeLoader,
-            VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
-            Output = KzgAccumulator<G1Affine, NativeLoader>,
-        > + AccumulationScheme<
-            G1Affine,
-            NativeLoader,
-            Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
-            VerifyingKey = KzgAsVerifyingKey,
-        > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>,
+    AS: NativeKzgAccumulationScheme,
 {
     let protocol = compile(
         params,
@@ -400,6 +392,22 @@ where
             .with_num_instance(num_instance.clone())
             .with_accumulator_indices(accumulator_indices),
     );
+    gen_dummy_snark_from_protocol::<AS>(protocol, num_instance)
+}
+
+/// Creates a dummy snark in the correct shape corresponding to the given Plonk protocol.
+/// This dummy snark will **not** verify.
+/// This snark can be used as a placeholder input into an aggregation circuit expecting a snark
+/// with this protocol.
+///
+/// Note that this function does not need to know the concrete `Circuit` type.
+pub fn gen_dummy_snark_from_protocol<AS>(
+    protocol: PlonkProtocol<G1Affine>,
+    num_instance: Vec<usize>,
+) -> Snark
+where
+    AS: NativeKzgAccumulationScheme,
+{
     let instances = num_instance.into_iter().map(|n| vec![Fr::default(); n]).collect();
     let proof = {
         let mut transcript = PoseidonTranscript::<NativeLoader, _>::new::<SECURE_MDS>(Vec::new());
