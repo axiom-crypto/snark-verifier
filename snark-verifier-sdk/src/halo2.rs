@@ -388,11 +388,9 @@ where
     let protocol = compile(
         params,
         vk,
-        Config::kzg()
-            .with_num_instance(num_instance.clone())
-            .with_accumulator_indices(accumulator_indices),
+        Config::kzg().with_num_instance(num_instance).with_accumulator_indices(accumulator_indices),
     );
-    gen_dummy_snark_from_protocol::<AS>(protocol, num_instance)
+    gen_dummy_snark_from_protocol::<AS>(protocol)
 }
 
 /// Creates a dummy snark in the correct shape corresponding to the given Plonk protocol.
@@ -401,14 +399,11 @@ where
 /// with this protocol.
 ///
 /// Note that this function does not need to know the concrete `Circuit` type.
-pub fn gen_dummy_snark_from_protocol<AS>(
-    protocol: PlonkProtocol<G1Affine>,
-    num_instance: Vec<usize>,
-) -> Snark
+pub fn gen_dummy_snark_from_protocol<AS>(protocol: PlonkProtocol<G1Affine>) -> Snark
 where
     AS: NativeKzgAccumulationScheme,
 {
-    let instances = num_instance.into_iter().map(|n| vec![Fr::default(); n]).collect();
+    let instances = protocol.num_instance.iter().map(|&n| vec![Fr::default(); n]).collect();
     let proof = {
         let mut transcript = PoseidonTranscript::<NativeLoader, _>::new::<SECURE_MDS>(Vec::new());
         for _ in 0..protocol
