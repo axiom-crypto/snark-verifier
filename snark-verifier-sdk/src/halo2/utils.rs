@@ -1,10 +1,9 @@
-use halo2_base::{
-    halo2_proofs::{
-        halo2curves::bn256::{Fr, G1Affine},
-        plonk::{Circuit, VerifyingKey},
-    },
-    utils::fs::read_params,
+use halo2_base::halo2_proofs::{
+    halo2curves::bn256::{Fr, G1Affine},
+    plonk::{Circuit, VerifyingKey},
+    poly::kzg::commitment::ParamsKZG,
 };
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::{Snark, SHPLONK};
 
@@ -52,20 +51,19 @@ pub trait KeygenAggregationCircuitIntent {
     ///
     /// Generates dummy snarks from the verifying keys in `vk_of_dependencies`, **assuming** that SHPLONK is
     /// used for the multi-open scheme.
-    /// To do so, it will try to read KZG trusted setup files from the directory set by environmental variable
-    /// `PARAMS_DIR` or `./params/`.
-    // The `params` is not actually used, so this requirement should be removed in the future:
-    // requires refactoring `compile`.
     fn build_keygen_circuit_shplonk(self) -> Self::AggregationCircuit
     where
         Self: Sized,
     {
+        let mut rng = StdRng::seed_from_u64(0u64);
         let snarks = self
             .intent_of_dependencies()
             .into_iter()
             .map(|AggregationDependencyIntent { vk, num_instance, accumulator_indices }| {
                 let k = vk.get_domain().k();
-                let params = read_params(k);
+                // In KZG `gen_dummy_snark_from_vk` calls `compile`, which only uses `params` for `params.k()` so we can just use a random untrusted setup.
+                // Moreover since this is a dummy snark, the trusted setup shouldn't matter.
+                let params = ParamsKZG::setup(k, &mut rng);
                 gen_dummy_snark_from_vk::<SHPLONK>(
                     &params,
                     vk,
