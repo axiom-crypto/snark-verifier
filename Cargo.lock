@@ -1230,9 +1230,9 @@ dependencies = [
 
 [[package]]
 name = "halo2curves-axiom"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d47eaec6a3040c2fbaa020716bf571b0c55025126242510f774183aff84b92e"
+checksum = "d1f0b8f4b7dc27d1e438dae6573e8d95c9f6ee568d1d21146a4c34c17db2ad38"
 dependencies = [
  "blake2b_simd",
  "ff",

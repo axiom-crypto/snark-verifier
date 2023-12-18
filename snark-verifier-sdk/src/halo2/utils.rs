@@ -6,7 +6,7 @@ use halo2_base::{
     utils::fs::read_params,
 };
 
-use crate::{CircuitExt, Snark, SHPLONK};
+use crate::{Snark, SHPLONK};
 
 use super::{aggregation::AggregationCircuit, gen_dummy_snark_from_vk};
 
@@ -14,14 +14,14 @@ use super::{aggregation::AggregationCircuit, gen_dummy_snark_from_vk};
 pub struct AggregationDependencyIntent<'a> {
     pub vk: &'a VerifyingKey<G1Affine>,
     pub num_instance: &'a [usize],
-    pub is_aggregation: bool,
+    pub accumulator_indices: Option<&'a [(usize, usize)]>,
 }
 
 #[derive(Clone, Debug)]
 pub struct AggregationDependencyIntentOwned {
     pub vk: VerifyingKey<G1Affine>,
     pub num_instance: Vec<usize>,
-    pub is_aggregation: bool,
+    pub accumulator_indices: Option<Vec<(usize, usize)>>,
 }
 
 /// This trait should be implemented on the minimal circuit configuration data necessary to
@@ -63,16 +63,14 @@ pub trait KeygenAggregationCircuitIntent {
         let snarks = self
             .intent_of_dependencies()
             .into_iter()
-            .map(|AggregationDependencyIntent { vk, num_instance, is_aggregation }| {
+            .map(|AggregationDependencyIntent { vk, num_instance, accumulator_indices }| {
                 let k = vk.get_domain().k();
                 let params = read_params(k);
-                let accumulator_indices =
-                    is_aggregation.then_some(AggregationCircuit::accumulator_indices().unwrap());
                 gen_dummy_snark_from_vk::<SHPLONK>(
                     &params,
                     vk,
                     num_instance.to_vec(),
-                    accumulator_indices,
+                    accumulator_indices.map(|v| v.to_vec()),
                 )
             })
             .collect();
@@ -85,7 +83,7 @@ impl<'a> From<&'a AggregationDependencyIntentOwned> for AggregationDependencyInt
         Self {
             vk: &intent.vk,
             num_instance: &intent.num_instance,
-            is_aggregation: intent.is_aggregation,
+            accumulator_indices: intent.accumulator_indices.as_deref(),
         }
     }
 }
