@@ -14,6 +14,8 @@ pub struct AggregationDependencyIntent<'a> {
     pub vk: &'a VerifyingKey<G1Affine>,
     pub num_instance: &'a [usize],
     pub accumulator_indices: Option<&'a [(usize, usize)]>,
+    /// See [`AggregationDependencyIntentOwned::agg_vk_hash_data`].
+    pub agg_vk_hash_data: Option<((usize, usize), Fr)>,
 }
 
 #[derive(Clone, Debug)]
@@ -21,6 +23,8 @@ pub struct AggregationDependencyIntentOwned {
     pub vk: VerifyingKey<G1Affine>,
     pub num_instance: Vec<usize>,
     pub accumulator_indices: Option<Vec<(usize, usize)>>,
+    /// If this dependency is itself from a universal aggregation circuit, this should contain (index, agg_vkey_hash), where `index = (i,j)` is the pair recording that the agg_vkey_hash is located at `instances[i][j]`.
+    pub agg_vk_hash_data: Option<((usize, usize), Fr)>,
 }
 
 /// This trait should be implemented on the minimal circuit configuration data necessary to
@@ -56,22 +60,39 @@ pub trait KeygenAggregationCircuitIntent {
         Self: Sized,
     {
         let mut rng = StdRng::seed_from_u64(0u64);
-        let snarks = self
-            .intent_of_dependencies()
-            .into_iter()
-            .map(|AggregationDependencyIntent { vk, num_instance, accumulator_indices }| {
-                let k = vk.get_domain().k();
-                // In KZG `gen_dummy_snark_from_vk` calls `compile`, which only uses `params` for `params.k()` so we can just use a random untrusted setup.
-                // Moreover since this is a dummy snark, the trusted setup shouldn't matter.
-                let params = ParamsKZG::setup(k, &mut rng);
-                gen_dummy_snark_from_vk::<SHPLONK>(
-                    &params,
-                    vk,
-                    num_instance.to_vec(),
-                    accumulator_indices.map(|v| v.to_vec()),
+        let snarks =
+            self.intent_of_dependencies()
+                .into_iter()
+                .map(
+                    |AggregationDependencyIntent {
+                         vk,
+                         num_instance,
+                         accumulator_indices,
+                         agg_vk_hash_data,
+                     }| {
+                        let k = vk.get_domain().k();
+                        // In KZG `gen_dummy_snark_from_vk` calls `compile`, which only uses `params` for `params.k()` so we can just use a random untrusted setup.
+                        // Moreover since this is a dummy snark, the trusted setup shouldn't matter.
+                        let params = ParamsKZG::setup(k, &mut rng);
+                        let mut snark = gen_dummy_snark_from_vk::<SHPLONK>(
+                            &params,
+                            vk,
+                            num_instance.to_vec(),
+                            accumulator_indices.map(|v| v.to_vec()),
+                        );
+                        // We set the current agg_vk_hash in the dummy snark so that the final agg_vk_hash is correct at the end of keygen.
+                        if let Some(((i, j), agg_vk_hash)) = agg_vk_hash_data {
+                            assert!(
+                            i < snark.instances.len(),
+                            "Invalid agg_vk_hash index: ({i},{j}), num_instance: {num_instance:?}");
+                            assert!(j < snark.instances[i].len(),
+                            "Invalid agg_vk_hash index: ({i},{j}), num_instance: {num_instance:?}");
+                            snark.instances[i][j] = agg_vk_hash;
+                        }
+                        snark
+                    },
                 )
-            })
-            .collect();
+                .collect();
         self.build_keygen_circuit_from_snarks(snarks)
     }
 }
@@ -82,6 +103,7 @@ impl<'a> From<&'a AggregationDependencyIntentOwned> for AggregationDependencyInt
             vk: &intent.vk,
             num_instance: &intent.num_instance,
             accumulator_indices: intent.accumulator_indices.as_deref(),
+            agg_vk_hash_data: intent.agg_vk_hash_data,
         }
     }
 }

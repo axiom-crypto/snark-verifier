@@ -1136,7 +1136,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
 name = "halo2-axiom"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1230,9 +1230,9 @@ dependencies = [
 
 [[package]]
 name = "halo2curves-axiom"
-version = "0.4.4"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1f0b8f4b7dc27d1e438dae6573e8d95c9f6ee568d1d21146a4c34c17db2ad38"
+checksum = "4a11fd188635e09153d007ac33300d0af76972342b2f5ca3f116cba8c759f57d"
 dependencies = [
  "blake2b_simd",
  "ff",
