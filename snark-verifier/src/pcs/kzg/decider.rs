@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     pcs::kzg::KzgSuccinctVerifyingKey,
     util::arithmetic::{CurveAffine, MultiMillerLoop},
@@ -5,7 +7,11 @@ use crate::{
 use std::marker::PhantomData;
 
 /// KZG deciding key.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "M::G1Affine: Serialize, M::G2Affine: Serialize",
+    deserialize = "M::G1Affine: Deserialize<'de>, M::G2Affine: Deserialize<'de>"
+))]
 pub struct KzgDecidingKey<M: MultiMillerLoop> {
     svk: KzgSuccinctVerifyingKey<M::G1Affine>,
     /// Generator on G2.

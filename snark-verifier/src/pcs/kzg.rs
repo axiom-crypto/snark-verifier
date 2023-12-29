@@ -15,9 +15,10 @@ pub use multiopen::{Bdfg21, Bdfg21Proof, Gwc19, Gwc19Proof};
 
 #[cfg(feature = "loader_halo2")]
 pub use accumulator::LimbsEncodingInstructions;
+use serde::{Deserialize, Serialize};
 
 /// KZG succinct verifying key.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct KzgSuccinctVerifyingKey<C: Copy> {
     /// Generator.
     pub g: C,
