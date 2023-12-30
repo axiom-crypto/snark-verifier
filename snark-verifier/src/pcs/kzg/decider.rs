@@ -30,6 +30,18 @@ impl<M: MultiMillerLoop> KzgDecidingKey<M> {
     ) -> Self {
         Self { svk: svk.into(), g2, s_g2, _marker: PhantomData }
     }
+    /// Succinct verifying key.
+    pub fn svk(&self) -> KzgSuccinctVerifyingKey<M::G1Affine> {
+        self.svk
+    }
+    /// Generator on G2.
+    pub fn g2(&self) -> M::G2Affine {
+        self.g2
+    }
+    /// Generator to the trusted-setup secret on G2.
+    pub fn s_g2(&self) -> M::G2Affine {
+        self.s_g2
+    }
 }
 
 impl<M: MultiMillerLoop> From<(M::G1Affine, M::G2Affine, M::G2Affine)> for KzgDecidingKey<M>
