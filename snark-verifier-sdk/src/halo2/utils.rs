@@ -1,9 +1,13 @@
 use halo2_base::halo2_proofs::{
-    halo2curves::bn256::{Fr, G1Affine},
+    halo2curves::bn256::{Bn256, Fr, G1Affine},
     plonk::{Circuit, VerifyingKey},
     poly::kzg::commitment::ParamsKZG,
 };
 use rand::{rngs::StdRng, SeedableRng};
+use snark_verifier::{
+    system::halo2::{compile, Config},
+    verifier::plonk::PlonkProtocol,
+};
 
 use crate::{Snark, SHPLONK};
 
@@ -25,6 +29,19 @@ pub struct AggregationDependencyIntentOwned {
     pub accumulator_indices: Option<Vec<(usize, usize)>>,
     /// If this dependency is itself from a universal aggregation circuit, this should contain (index, agg_vkey_hash), where `index = (i,j)` is the pair recording that the agg_vkey_hash is located at `instances[i][j]`.
     pub agg_vk_hash_data: Option<((usize, usize), Fr)>,
+}
+
+impl<'a> AggregationDependencyIntent<'a> {
+    /// Converts `self` into `PlonkProtocol`
+    pub fn compile(self, params: &ParamsKZG<Bn256>) -> PlonkProtocol<G1Affine> {
+        compile(
+            params,
+            self.vk,
+            Config::kzg()
+                .with_num_instance(self.num_instance.to_vec())
+                .with_accumulator_indices(self.accumulator_indices.map(|v| v.to_vec())),
+        )
+    }
 }
 
 /// This trait should be implemented on the minimal circuit configuration data necessary to
