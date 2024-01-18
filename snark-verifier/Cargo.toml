@@ -1,7 +1,13 @@
 [package]
 name = "snark-verifier"
 version = "0.1.7"
+authors = ["Privacy Scaling Explorations Team", "Intrinsic Technologies"]
+license = "MIT"
 edition = "2021"
+repository = "https://github.com/axiom-crypto/snark-verifier"
+readme = "../README.md"
+description = "Generic (S)NARK verifier for Rust, halo2, and EVM. This is a fork of PSE's version."
+rust-version = "1.73.0"
 
 [dependencies]
 itertools = "0.11"
