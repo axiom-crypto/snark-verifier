@@ -201,8 +201,8 @@ mod halo2 {
 
     mod halo2_lib {
         use super::*;
-        use halo2_base::halo2_proofs::halo2curves::CurveAffineExt;
         use halo2_base::utils::BigPrimeField;
+        use halo2_base::utils::CurveAffineExt;
         use halo2_ecc::ecc::BaseFieldEccChip;
 
         impl<'chip, C, const LIMBS: usize, const BITS: usize>

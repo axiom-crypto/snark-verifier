@@ -24,8 +24,8 @@ serde_json = "1.0"
 serde_with = { version = "2.2", optional = true }
 bincode = "1.3.3"
 ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
-halo2-base = { version = "=0.4.1", default-features = false }
-#halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "main", default-features = false }
+# halo2-base = { version = "=0.4.1", default-features = false }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "main", default-features = false }
 snark-verifier = { version = "=0.1.7", path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
 
@@ -58,7 +58,7 @@ loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 revm = ["snark-verifier/revm"]
 parallel = ["snark-verifier/parallel"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
-# halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
+halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]

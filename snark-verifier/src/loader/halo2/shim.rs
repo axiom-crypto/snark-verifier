@@ -138,21 +138,22 @@ pub trait EccInstructions<C: CurveAffine>: Clone + Debug {
 }
 
 mod halo2_lib {
-    use crate::halo2_proofs::halo2curves::CurveAffineExt;
     use crate::{
         loader::halo2::{EccInstructions, IntegerInstructions},
         util::arithmetic::{CurveAffine, PrimeField},
     };
-    use halo2_base::gates::flex_gate::threads::SinglePhaseCoreManager;
     use halo2_base::{
         self,
-        gates::{GateChip, GateInstructions, RangeInstructions},
-        utils::BigPrimeField,
+        gates::{
+            flex_gate::threads::SinglePhaseCoreManager, GateChip, GateInstructions,
+            RangeInstructions,
+        },
+        utils::{BigPrimeField, CurveAffineExt},
         AssignedValue,
         QuantumCell::{Constant, Existing},
     };
-    use halo2_ecc::bigint::ProperCrtUint;
     use halo2_ecc::{
+        bigint::ProperCrtUint,
         ecc::{BaseFieldEccChip, EcPoint},
         fields::FieldChip,
     };
