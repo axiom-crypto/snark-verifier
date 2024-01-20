@@ -22,11 +22,11 @@ pairing = { version = "0.23" }
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 # halo2-base = { version = "=0.4.1", default-features = false }
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "main", default-features = false }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.4.1-git", default-features = false }
 
 # loader_halo2
 # halo2-ecc = { version = "=0.4.1", default-features = false, optional = true }
-halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "main", default-features = false, optional = true }
+halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.4.1-git", default-features = false, optional = true }
 
 # parallel
 rayon = { version = "1.8", optional = true }
