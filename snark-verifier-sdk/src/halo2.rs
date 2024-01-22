@@ -213,7 +213,6 @@ where
 
     let instances = circuit.instances();
     let proof = gen_proof::<ConcreteCircuit, P, V>(params, pk, circuit, instances.clone(), None);
-    // If we can't serialize the entire snark, at least serialize the proof
 
     let snark = Snark::new(protocol, instances, proof);
     if let Some(path) = &path {
