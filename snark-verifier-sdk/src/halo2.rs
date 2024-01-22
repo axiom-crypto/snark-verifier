@@ -198,7 +198,6 @@ where
         MSMAccumulator = DualMSM<'params, Bn256>,
     >,
 {
-    #[cfg(feature = "halo2-axiom")]
     if let Some(path) = &path {
         if let Ok(snark) = read_snark(path) {
             return snark;
@@ -213,21 +212,10 @@ where
     );
 
     let instances = circuit.instances();
-    #[cfg(feature = "halo2-axiom")]
     let proof = gen_proof::<ConcreteCircuit, P, V>(params, pk, circuit, instances.clone(), None);
     // If we can't serialize the entire snark, at least serialize the proof
-    #[cfg(not(feature = "halo2-axiom"))]
-    let proof = {
-        let path = path.map(|path| {
-            let path = path.as_ref().to_str().unwrap();
-            (format!("{path}.instances"), format!("{path}.proof"))
-        });
-        let paths = path.as_ref().map(|path| (Path::new(&path.0), Path::new(&path.1)));
-        gen_proof::<ConcreteCircuit, P, V>(params, pk, circuit, instances.clone(), paths)
-    };
 
     let snark = Snark::new(protocol, instances, proof);
-    #[cfg(feature = "halo2-axiom")]
     if let Some(path) = &path {
         let f = File::create(path).unwrap();
         #[cfg(feature = "display")]
@@ -269,7 +257,6 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
 /// Tries to deserialize a SNARK from the specified `path` using `bincode`.
 ///
 /// WARNING: The user must keep track of whether the SNARK was generated using the GWC or SHPLONK multi-open scheme.
-#[cfg(feature = "halo2-axiom")]
 pub fn read_snark(path: impl AsRef<Path>) -> Result<Snark, bincode::Error> {
     let f = File::open(path).map_err(Box::<bincode::ErrorKind>::from)?;
     bincode::deserialize_from(f)
