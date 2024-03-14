@@ -1,6 +1,6 @@
 [package]
 name = "snark-verifier-sdk"
-version = "0.1.7"
+version = "0.1.8"
 authors = ["Privacy Scaling Explorations Team", "Intrinsic Technologies"]
 license = "MIT"
 edition = "2021"
@@ -26,11 +26,13 @@ bincode = "1.3.3"
 ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 # halo2-base = { version = "=0.4.1", default-features = false }
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", branch = "develop", default-features = false }
-snark-verifier = { version = "=0.1.7", path = "../snark-verifier", default-features = false }
+snark-verifier = { version = "0.1.8", path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
 
 # loader_evm
-ethereum-types = { version = "=0.14.1", default-features = false, features = ["std"], optional = true }
+ethereum-types = { version = "=0.14.1", default-features = false, features = [
+    "std",
+], optional = true }
 
 # zkevm benchmarks
 # zkevm-circuits = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits.git", rev = "f834e61", features = [
@@ -48,13 +50,21 @@ criterion = "0.5.1"
 criterion-macro = "0.4"
 # loader_evm
 crossterm = { version = "0.25" }
-ratatui = { version = "0.24", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.24", default-features = false, features = [
+    "crossterm",
+] }
 clap = "=4.4" # fix clap version to prevent requiring rustc 1.74
 clap_builder = "=4.4"
 clap_lex = "=0.6.0"
 
 [features]
-default = ["loader_halo2", "loader_evm", "halo2-axiom", "halo2-base/jemallocator", "display"]
+default = [
+    "loader_halo2",
+    "loader_evm",
+    "halo2-axiom",
+    "halo2-base/jemallocator",
+    "display",
+]
 display = ["snark-verifier/display", "dep:ark-std"]
 loader_halo2 = ["snark-verifier/loader_halo2"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
