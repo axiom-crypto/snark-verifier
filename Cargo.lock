@@ -1127,6 +1127,8 @@ dependencies = [
 [[package]]
 name = "halo2-axiom"
 version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d698920cd4cb189e6b90db50cb9393f1671f732f39665b907f745b5d45b51c8c"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1146,6 +1148,7 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.4.2-alpha.0"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#d23968cd00a0a0bbfe78f8bdaa83107749c51d85"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1167,6 +1170,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.4.1"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#d23968cd00a0a0bbfe78f8bdaa83107749c51d85"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",

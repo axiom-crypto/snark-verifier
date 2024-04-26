@@ -291,7 +291,7 @@ mod halo2_lib {
                 let constant = EccInstructions::assign_constant(self, ctx, constant);
                 Some(constant)
             };
-            self.sum::<C>(
+            self.sum_unsafe::<C>(
                 ctx.main(),
                 constant.into_iter().chain(values.iter().map(|v| v.deref().clone())),
             )
