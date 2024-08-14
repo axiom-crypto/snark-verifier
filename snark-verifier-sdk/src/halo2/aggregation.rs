@@ -90,7 +90,7 @@ impl VerifierUniversality {
 
 #[allow(clippy::type_complexity)]
 /// Core function used in `synthesize` to aggregate multiple `snarks`.
-///  
+///
 /// Returns the assigned instances of previous snarks and the new final pair that needs to be verified in a pairing check.
 /// For each previous snark, we concatenate all instances into a single vector. We return a vector of vectors,
 /// one vector per snark, for convenience.
@@ -361,6 +361,7 @@ pub enum AssignedTranscriptObject {
 /// ## Notes
 /// - This function does _not_ expose any public instances.
 /// - `svk` is the generator of the KZG trusted setup, usually gotten via `params.get_g()[0]`
+///
 /// (avoids having to pass `params` into function just to get generator)
 ///
 /// ## Universality

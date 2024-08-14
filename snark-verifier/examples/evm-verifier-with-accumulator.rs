@@ -304,6 +304,7 @@ mod aggregation {
         pub lookup_bits: usize,
     }
 
+    #[allow(dead_code)]
     #[derive(Clone, Debug)]
     pub struct AggregationCircuit {
         pub inner: BaseCircuitBuilder<Fr>,
