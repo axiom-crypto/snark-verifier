@@ -394,7 +394,7 @@ fn h_coeffs<F: Field>(xi: &[F], scalar: F) -> Vec<F> {
     coeffs
 }
 
-#[cfg(all(test, feature = "system_halo2"))]
+#[cfg(all(test, feature = "halo2-pse"))]
 mod test {
     use crate::{
         pcs::{
