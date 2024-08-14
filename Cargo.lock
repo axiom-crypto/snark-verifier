@@ -1174,9 +1174,9 @@ dependencies = [
 
 [[package]]
 name = "halo2-axiom"
-version = "0.4.4"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d698920cd4cb189e6b90db50cb9393f1671f732f39665b907f745b5d45b51c8c"
+checksum = "cd416f4aec9c86b0d8b7bb16f7285b0e424fb7161a9552f72ef7473e3988665d"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1196,7 +1196,7 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.4.2-alpha.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#399903e0d8c353fe57ed02c387c84ff389d0e202"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#6774c588a491a25a274d700ed16abaacd5a78ac2"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.4.1"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#399903e0d8c353fe57ed02c387c84ff389d0e202"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#6774c588a491a25a274d700ed16abaacd5a78ac2"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -1277,9 +1277,9 @@ dependencies = [
 
 [[package]]
 name = "halo2curves-axiom"
-version = "0.5.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75bb262279138550a603b35a73da944fcde987a321eb550c05276ce7b0a4e692"
+checksum = "dd8309e4638b4f1bcf6613d72265a84074d26034c35edc5d605b5688e580b8b8"
 dependencies = [
  "blake2b_simd",
  "digest 0.10.7",
@@ -1287,7 +1287,6 @@ dependencies = [
  "group",
  "hex",
  "lazy_static",
- "maybe-rayon",
  "num-bigint",
  "num-traits",
  "pairing",
@@ -1295,11 +1294,13 @@ dependencies = [
  "paste",
  "rand",
  "rand_core",
+ "rayon",
  "serde",
  "serde_arrays",
  "sha2",
  "static_assertions",
  "subtle",
+ "unroll",
 ]
 
 [[package]]
@@ -3056,6 +3057,16 @@ name = "unicode-width"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0336d538f7abc86d282a4189614dfaa90810dfc2c6f6427eaf88e16311dd225d"
+
+[[package]]
+name = "unroll"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "utf8parse"
