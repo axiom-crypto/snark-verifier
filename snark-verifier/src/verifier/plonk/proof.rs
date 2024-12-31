@@ -197,7 +197,7 @@ where
         protocol: &'a PlonkProtocol<C, L>,
         common_poly_eval: &CommonPolynomialEvaluation<C, L>,
         evaluations: &mut BTreeMap<Query, L::LoadedScalar>,
-    ) -> Result<Vec<Msm<C, L>>, Error> {
+    ) -> Result<Vec<Msm<'a, C, L>>, Error> {
         let loader = common_poly_eval.zn().loader();
         let mut commitments = iter::empty()
             .chain(protocol.preprocessed.iter().map(Msm::base))
