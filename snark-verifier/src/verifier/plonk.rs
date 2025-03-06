@@ -25,7 +25,7 @@ use crate::{
 use std::{iter, marker::PhantomData};
 
 mod proof;
-pub(crate) mod protocol;
+pub mod protocol;
 
 pub use proof::PlonkProof;
 pub use protocol::PlonkProtocol;
