@@ -118,12 +118,11 @@ pub trait EvmKzgAccumulationScheme = PolynomialCommitmentScheme<
         Accumulator = KzgAccumulator<G1Affine, Rc<EvmLoader>>,
     > + AccumulationDecider<G1Affine, Rc<EvmLoader>, DecidingKey = KzgDecidingKey<Bn256>>;
 
-pub fn gen_evm_verifier<C, AS>(
+pub fn gen_evm_verifier_sol_code<C, AS>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
-    path: Option<&Path>,
-) -> Vec<u8>
+) -> String
 where
     C: CircuitExt<Fr>,
     AS: EvmKzgAccumulationScheme,
@@ -146,8 +145,20 @@ where
     let proof =
         PlonkVerifier::<AS>::read_proof(&dk, &protocol, &instances, &mut transcript).unwrap();
     PlonkVerifier::<AS>::verify(&dk, &protocol, &instances, &proof).unwrap();
+    loader.solidity_code()
+}
 
-    let sol_code = loader.solidity_code();
+pub fn gen_evm_verifier<C, AS>(
+    params: &ParamsKZG<Bn256>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> Vec<u8>
+where
+    C: CircuitExt<Fr>,
+    AS: EvmKzgAccumulationScheme,
+{
+    let sol_code = gen_evm_verifier_sol_code::<C, AS>(params, vk, num_instance);
     let byte_code = compile_solidity(&sol_code);
     if let Some(path) = path {
         path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
