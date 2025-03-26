@@ -1154,9 +1154,9 @@ dependencies = [
 
 [[package]]
 name = "halo2-axiom"
-version = "0.4.4"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d698920cd4cb189e6b90db50cb9393f1671f732f39665b907f745b5d45b51c8c"
+checksum = "62f0ca78d12ac5c893f286d7cdfe3869290305ab8cac376e2592cdc8396da102"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1168,6 +1168,7 @@ dependencies = [
  "pairing",
  "rand",
  "rand_core",
+ "rayon",
  "rustc-hash 1.1.0",
  "sha3 0.10.8",
  "tracing",
@@ -1175,8 +1176,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-base"
-version = "0.4.1"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.4.1-git#2fe813b3ccd4f224da195d61829effb20599dcbd"
+version = "0.5.0"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.0-git#b8c4d6603785e7db2bf14febd07aaf0f9c38789b"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1197,8 +1198,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-ecc"
-version = "0.4.1"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.4.1-git#2fe813b3ccd4f224da195d61829effb20599dcbd"
+version = "0.5.0"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.0-git#b8c4d6603785e7db2bf14febd07aaf0f9c38789b"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -1257,9 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "halo2curves-axiom"
-version = "0.5.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75bb262279138550a603b35a73da944fcde987a321eb550c05276ce7b0a4e692"
+checksum = "dd8309e4638b4f1bcf6613d72265a84074d26034c35edc5d605b5688e580b8b8"
 dependencies = [
  "blake2b_simd",
  "digest 0.10.7",
@@ -1267,7 +1268,6 @@ dependencies = [
  "group",
  "hex",
  "lazy_static",
- "maybe-rayon",
  "num-bigint",
  "num-traits",
  "pairing",
@@ -1275,11 +1275,13 @@ dependencies = [
  "paste",
  "rand",
  "rand_core",
+ "rayon",
  "serde",
  "serde_arrays",
  "sha2",
  "static_assertions",
  "subtle",
+ "unroll",
 ]
 
 [[package]]
@@ -1910,9 +1912,9 @@ dependencies = [
 
 [[package]]
 name = "poseidon-primitives"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd95570f7ea849b4187298b5bb229643e44e1d47ddf3979d0db8a1c28be26a8"
+checksum = "6e4aaeda7a092e21165cc5f0cbc738e72a46f31c03c3cbd87b71ceae9d2d93bc"
 dependencies = [
  "bitvec",
  "ff",
@@ -2120,9 +2122,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4963ed1bc86e4f3ee217022bd855b297cef07fb9eac5dfa1f788b220b49b3bd"
+checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
 dependencies = [
  "either",
  "rayon-core",
@@ -2619,7 +2621,7 @@ checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 
 [[package]]
 name = "snark-verifier"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "ark-std 0.3.0",
  "crossterm 0.25.0",
@@ -2646,7 +2648,7 @@ dependencies = [
 
 [[package]]
 name = "snark-verifier-sdk"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "ark-std 0.3.0",
  "bincode",
@@ -3030,6 +3032,16 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unroll"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "uuid"

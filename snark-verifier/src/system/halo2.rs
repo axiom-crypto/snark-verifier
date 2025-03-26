@@ -97,7 +97,6 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
         .iter()
         .chain(vk.permutation().commitments().iter())
         .cloned()
-        .map(Into::into)
         .collect();
 
     let polynomials = &Polynomials::new(cs, zk, query_instance, num_instance, num_proof);

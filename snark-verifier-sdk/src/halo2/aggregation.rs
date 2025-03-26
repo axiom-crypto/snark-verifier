@@ -339,6 +339,9 @@ pub trait AccumulationSchemeSDK:
 {
 }
 
+impl AccumulationSchemeSDK for crate::GWC {}
+impl AccumulationSchemeSDK for crate::SHPLONK {}
+
 /// **Private** witnesses that form the output of [aggregate_snarks].
 /// Same as [SnarkAggregationWitness] except that we flatten `accumulator` into a vector of field elements.
 #[derive(Clone, Debug)]
