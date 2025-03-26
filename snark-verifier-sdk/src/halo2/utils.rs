@@ -11,7 +11,7 @@ use snark_verifier::{
 
 use crate::{Snark, SHPLONK};
 
-use super::{aggregation::AggregationCircuit, gen_dummy_snark_from_vk};
+use super::gen_dummy_snark_from_vk;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AggregationDependencyIntent<'a> {
@@ -55,7 +55,7 @@ impl AggregationDependencyIntent<'_> {
 /// The aggregation circuit should only depend on the verifying key of each dependency snark.
 pub trait KeygenAggregationCircuitIntent {
     /// Concrete circuit type. Defaults to [`AggregationCircuit`].
-    type AggregationCircuit: Circuit<Fr> = AggregationCircuit;
+    type AggregationCircuit: Circuit<Fr>;
 
     /// The **ordered** list of [`VerifyingKey`]s of the circuits to be aggregated.
     fn intent_of_dependencies(&self) -> Vec<AggregationDependencyIntent>;

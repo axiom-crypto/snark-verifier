@@ -1,5 +1,3 @@
-#![feature(associated_type_defaults)]
-#![feature(trait_alias)]
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs::{self};
