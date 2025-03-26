@@ -291,6 +291,7 @@ mod application {
     impl Circuit<Fr> for Square {
         type Config = Selector;
         type FloorPlanner = SimpleFloorPlanner;
+        type Params = ();
 
         fn without_witnesses(&self) -> Self {
             Self::default()

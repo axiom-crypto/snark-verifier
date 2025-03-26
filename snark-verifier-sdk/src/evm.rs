@@ -106,7 +106,8 @@ pub fn gen_evm_proof_shplonk<'params, C: Circuit<Fr>>(
     gen_evm_proof::<C, ProverSHPLONK<_>, VerifierSHPLONK<_>>(params, pk, circuit, instances)
 }
 
-pub trait EvmKzgAccumulationScheme = PolynomialCommitmentScheme<
+pub trait EvmKzgAccumulationScheme:
+    PolynomialCommitmentScheme<
         G1Affine,
         Rc<EvmLoader>,
         VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
@@ -116,7 +117,12 @@ pub trait EvmKzgAccumulationScheme = PolynomialCommitmentScheme<
         Rc<EvmLoader>,
         VerifyingKey = KzgAsVerifyingKey,
         Accumulator = KzgAccumulator<G1Affine, Rc<EvmLoader>>,
-    > + AccumulationDecider<G1Affine, Rc<EvmLoader>, DecidingKey = KzgDecidingKey<Bn256>>;
+    > + AccumulationDecider<G1Affine, Rc<EvmLoader>, DecidingKey = KzgDecidingKey<Bn256>>
+{
+}
+
+impl EvmKzgAccumulationScheme for crate::GWC {}
+impl EvmKzgAccumulationScheme for crate::SHPLONK {}
 
 pub fn gen_evm_verifier_sol_code<C, AS>(
     params: &ParamsKZG<Bn256>,

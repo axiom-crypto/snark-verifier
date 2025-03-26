@@ -99,6 +99,7 @@ mod application {
     impl Circuit<Fr> for StandardPlonk {
         type Config = StandardPlonkConfig;
         type FloorPlanner = SimpleFloorPlanner;
+        type Params = ();
 
         fn without_witnesses(&self) -> Self {
             Self::default()

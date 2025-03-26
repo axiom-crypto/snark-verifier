@@ -261,7 +261,8 @@ pub fn read_snark(path: impl AsRef<Path>) -> Result<Snark, bincode::Error> {
     bincode::deserialize_from(f)
 }
 
-pub trait NativeKzgAccumulationScheme = PolynomialCommitmentScheme<
+pub trait NativeKzgAccumulationScheme:
+    PolynomialCommitmentScheme<
         G1Affine,
         NativeLoader,
         VerifyingKey = KzgSuccinctVerifyingKey<G1Affine>,
@@ -271,7 +272,12 @@ pub trait NativeKzgAccumulationScheme = PolynomialCommitmentScheme<
         NativeLoader,
         Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
         VerifyingKey = KzgAsVerifyingKey,
-    > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>;
+    > + CostEstimation<G1Affine, Input = Vec<Query<Rotation>>>
+{
+}
+
+impl NativeKzgAccumulationScheme for crate::GWC {}
+impl NativeKzgAccumulationScheme for crate::SHPLONK {}
 
 // copied from snark_verifier --example recursion
 pub fn gen_dummy_snark<ConcreteCircuit, AS>(
