@@ -313,13 +313,14 @@ pub struct AggregationCircuit {
     // pub as_proof: Vec<u8>,
 }
 
-// trait just so we can have a generic that is either SHPLONK or GWC
-pub trait Halo2KzgAccumulationScheme<'a> = PolynomialCommitmentScheme<
+/// SDK trait which makes it possible for other project directly use the AggregationCircuit with any `AccumulationScheme' like GWC & SHPLONK
+pub trait AccumulationSchemeSDK:
+    for<'a> PolynomialCommitmentScheme<
         G1Affine,
         Rc<Halo2Loader<'a>>,
         VerifyingKey = Svk,
         Output = KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
-    > + AccumulationScheme<
+    > + for<'a> AccumulationScheme<
         G1Affine,
         Rc<Halo2Loader<'a>>,
         Accumulator = KzgAccumulator<G1Affine, Rc<Halo2Loader<'a>>>,
@@ -334,7 +335,9 @@ pub trait Halo2KzgAccumulationScheme<'a> = PolynomialCommitmentScheme<
         NativeLoader,
         Accumulator = KzgAccumulator<G1Affine, NativeLoader>,
         VerifyingKey = KzgAsVerifyingKey,
-    > + AccumulationSchemeProver<G1Affine, ProvingKey = KzgAsProvingKey<G1Affine>>;
+    > + AccumulationSchemeProver<G1Affine, ProvingKey = KzgAsProvingKey<G1Affine>>
+{
+}
 
 /// **Private** witnesses that form the output of [aggregate_snarks].
 /// Same as [SnarkAggregationWitness] except that we flatten `accumulator` into a vector of field elements.
@@ -382,7 +385,7 @@ pub fn aggregate_snarks<AS>(
     universality: VerifierUniversality,
 ) -> SnarkAggregationOutput
 where
-    AS: for<'a> Halo2KzgAccumulationScheme<'a>,
+    AS: AccumulationSchemeSDK,
 {
     let snarks = snarks.into_iter().collect_vec();
 
@@ -496,7 +499,7 @@ impl AggregationCircuit {
         universality: VerifierUniversality,
     ) -> Self
     where
-        AS: for<'a> Halo2KzgAccumulationScheme<'a>,
+        AS: AccumulationSchemeSDK,
     {
         let svk: Svk = params.get_g()[0].into();
         let mut builder = BaseCircuitBuilder::from_stage(stage).use_params(config_params.into());
