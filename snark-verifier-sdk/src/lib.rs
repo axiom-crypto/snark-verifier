@@ -1,5 +1,6 @@
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
+use halo2::aggregation::AccumulationSchemeSDK;
 use halo2_base::halo2_proofs::{self};
 use halo2_proofs::{
     halo2curves::{
@@ -42,6 +43,9 @@ pub type PlonkSuccinctVerifier<AS> =
     verifier::plonk::PlonkSuccinctVerifier<AS, LimbsEncoding<LIMBS, BITS>>;
 pub type SHPLONK = KzgAs<Bn256, Bdfg21>;
 pub type GWC = KzgAs<Bn256, Gwc19>;
+
+impl AccumulationSchemeSDK for GWC {}
+impl AccumulationSchemeSDK for SHPLONK {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snark {
