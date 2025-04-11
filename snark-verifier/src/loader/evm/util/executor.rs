@@ -1,23 +1,26 @@
-use revm::primitives::TxKind;
 use revm::{
-    primitives::{ExecutionResult, Output, TransactTo, TxEnv},
-    Context, Evm, Handler, InMemoryDB,
+    context::{
+        result::{ExecutionResult, Output},
+        TxEnv,
+    },
+    database::InMemoryDB,
+    primitives::TxKind,
+    Context, ExecuteCommitEvm, MainBuilder, MainContext,
 };
 
 /// Deploy contract and then call with calldata.
 /// Returns gas_used of call to deployed contract if both transactions are successful.
 pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u64, String> {
-    let mut evm =
-        Evm::new(Context::new_with_db(InMemoryDB::default()), Handler::new(Default::default()));
+    let mut evm = Context::mainnet().with_db(InMemoryDB::default()).build_mainnet();
 
-    *evm.tx_mut() = TxEnv {
+    let tx = TxEnv {
         gas_limit: u64::MAX,
-        transact_to: TxKind::Create,
+        kind: TxKind::Create,
         data: deployment_code.into(),
         ..Default::default()
     };
 
-    let result = evm.transact_commit().unwrap();
+    let result = evm.transact_commit(tx).unwrap();
     let contract = match result {
         ExecutionResult::Success {
             output: Output::Create(_, Some(contract)),
@@ -36,14 +39,14 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
         _ => unreachable!(),
     };
 
-    *evm.tx_mut() = TxEnv {
+    let tx = TxEnv {
         gas_limit: u64::MAX,
-        transact_to: TransactTo::Call(contract),
+        kind: TxKind::Call(contract),
         data: calldata.into(),
         ..Default::default()
     };
 
-    let result = evm.transact_commit().unwrap();
+    let result = evm.transact_commit(tx).unwrap();
     match result {
         ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
         ExecutionResult::Revert { gas_used, output } => Err(format!(
