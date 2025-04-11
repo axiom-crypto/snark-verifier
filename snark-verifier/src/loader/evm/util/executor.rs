@@ -43,6 +43,7 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
         gas_limit: u64::MAX,
         kind: TxKind::Call(contract),
         data: calldata.into(),
+        nonce: 1,
         ..Default::default()
     };
 
