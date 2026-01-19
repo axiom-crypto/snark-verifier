@@ -19,7 +19,7 @@ hex = "0.4"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 pairing = { version = "0.23" }
-
+serde_json = "1.0"
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 # halo2-base = { version = "=0.4.1", default-features = false }
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
