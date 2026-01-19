@@ -13,13 +13,20 @@ use revm::{
 pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u64, String> {
     let mut evm = Context::mainnet().with_db(InMemoryDB::default()).build_mainnet();
 
+    // allow oversized verifier in local sim
+    evm.cfg.limit_contract_code_size = Some(usize::MAX);
+    evm.cfg.limit_contract_initcode_size = Some(usize::MAX); // also set this
+
+    // avoid tx gas-limit > block gas-limit validation
+    evm.block.gas_limit = u64::MAX;
+
+    // and DON'T use u64::MAX in the tx itself
     let tx = TxEnv {
-        gas_limit: u64::MAX,
+        gas_limit: 100_000_000, // pick something huge but sane
         kind: TxKind::Create,
         data: deployment_code.into(),
         ..Default::default()
     };
-
     let result = evm.transact_commit(tx).unwrap();
     let contract = match result {
         ExecutionResult::Success {

@@ -108,6 +108,7 @@ pub fn compile_solidity(code: &str) -> Vec<u8> {
     let mut cmd = Command::new("solc")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::null()) // <-- silence solc warnings
         .arg("--bin")
         .arg("-")
         .spawn()
