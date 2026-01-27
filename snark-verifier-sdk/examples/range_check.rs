@@ -1,18 +1,23 @@
+use std::path::Path;
+
 use ark_std::{end_timer, start_timer};
 use halo2_base::gates::circuit::builder::BaseCircuitBuilder;
 use halo2_base::gates::circuit::{BaseCircuitParams, CircuitBuilderStage};
 use halo2_base::gates::{GateInstructions, RangeInstructions};
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 use halo2_base::utils::fs::gen_srs;
-
 use itertools::Itertools;
+#[cfg(feature = "revm")]
+use snark_verifier_sdk::evm::evm_verify;
+use snark_verifier_sdk::evm::gen_evm_verifier_gwc;
 use snark_verifier_sdk::halo2::aggregation::{AggregationConfigParams, VerifierUniversality};
-use snark_verifier_sdk::SHPLONK;
+use snark_verifier_sdk::halo2::gen_snark_gwc;
 use snark_verifier_sdk::{
     gen_pk,
     halo2::{aggregation::AggregationCircuit, gen_snark_shplonk},
     Snark,
 };
+use snark_verifier_sdk::{CircuitExt, SHPLONK};
 
 fn generate_circuit(k: u32, fill: bool) -> Snark {
     let lookup_bits = k as usize - 1;
@@ -85,7 +90,18 @@ fn main() {
             VerifierUniversality::Full,
         )
         .use_break_points(break_points.clone());
-        let _snark = gen_snark_shplonk(&params, &pk, agg_circuit, None::<&str>);
+        let _snark = gen_snark_gwc(&params, &pk, agg_circuit.clone(), None::<&str>);
+        println!("proof size: {}", _snark.proof.len());
         println!("snark {i} success");
+        let num_instances = agg_circuit.num_instance();
+        let instances = agg_circuit.instances();
+        let _deployment_code = gen_evm_verifier_gwc::<AggregationCircuit>(
+            &params,
+            pk.get_vk(),
+            num_instances,
+            Some(Path::new("examples/StandardPlonkVerifier.sol")),
+        );
+        #[cfg(feature = "revm")]
+        evm_verify(_deployment_code, instances, _snark.proof).expect("evm_verify should succeed");
     }
 }

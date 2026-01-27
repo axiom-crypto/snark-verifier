@@ -8,7 +8,9 @@ use halo2_proofs::{halo2curves::bn256::Bn256, poly::kzg::commitment::ParamsKZG};
 use rand::rngs::OsRng;
 #[cfg(feature = "revm")]
 use snark_verifier_sdk::evm::evm_verify;
-use snark_verifier_sdk::evm::{gen_evm_proof_gwc, gen_evm_proof_shplonk, gen_evm_verifier_gwc, gen_evm_verifier_shplonk};
+use snark_verifier_sdk::evm::{
+    gen_evm_proof_gwc, gen_evm_proof_shplonk, gen_evm_verifier_gwc, gen_evm_verifier_shplonk,
+};
 use snark_verifier_sdk::halo2::aggregation::{AggregationConfigParams, VerifierUniversality};
 use snark_verifier_sdk::{
     gen_pk,
@@ -175,6 +177,7 @@ fn gen_application_snark(params: &ParamsKZG<Bn256>) -> Snark {
     let pk = gen_pk(params, &circuit, None);
     gen_snark_shplonk(params, &pk, circuit, None::<&str>)
 }
+// ... same imports ...
 
 fn main() {
     let params_app = gen_srs(8);
@@ -184,19 +187,33 @@ fn main() {
     let params = gen_srs(k);
     let snarks = [(); 1].map(|_| gen_application_snark(&params_app));
 
-    let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
+    // 1) Build a keygen circuit once to get the *minimal* config
+    let mut tmp = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,
         AggregationConfigParams { degree: k, lookup_bits, ..Default::default() },
         &params,
         snarks.clone(),
         VerifierUniversality::Full,
     );
-    let agg_config = agg_circuit.calculate_params(Some(10));
+    let mut agg_config = tmp.calculate_params(Some(10));
 
+    // 2) Bump columns to inflate proof size
+    agg_config.num_advice += 14; // 14
+    println!("num advice columns: {}", agg_config.num_advice);
+
+    // 3) Rebuild keygen circuit with the FINAL config, then keygen to pin breakpoints
+    let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
+        CircuitBuilderStage::Keygen,
+        agg_config,
+        &params,
+        snarks.clone(),
+        VerifierUniversality::Full,
+    );
     let pk = gen_pk(&params, &agg_circuit, None);
     let break_points = agg_circuit.break_points();
     drop(agg_circuit);
 
+    // 4) Prover circuit uses same config + breakpoints
     let agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Prover,
         agg_config,
@@ -205,16 +222,26 @@ fn main() {
         VerifierUniversality::Full,
     )
     .use_break_points(break_points);
+
     let num_instances = agg_circuit.num_instance();
     let instances = agg_circuit.instances();
-    let _proof = gen_evm_proof_gwc(&params, &pk, agg_circuit, instances.clone());
+    let proof = gen_evm_proof_gwc(&params, &pk, agg_circuit, instances.clone());
+    println!("proof size: {}", proof.len());
 
     let _deployment_code = gen_evm_verifier_gwc::<AggregationCircuit>(
         &params,
         pk.get_vk(),
         num_instances,
-        Some(Path::new("examples/StandardPlonkVerifier.sol")),
+        Some(Path::new("examples/StandardPlonkVerifier3.sol")),
     );
+    println!("deployment code len: {}", _deployment_code.len());
+
     #[cfg(feature = "revm")]
-    evm_verify(_deployment_code, instances, _proof).expect("evm_verify should succeed");
+    if let (gas_cost) =
+        evm_verify(_deployment_code, instances, proof).expect("evm_verify should succeed")
+    {
+        println!("gas cost: {}", gas_cost);
+    } else {
+        println!("evm_verify failed");
+    }
 }
