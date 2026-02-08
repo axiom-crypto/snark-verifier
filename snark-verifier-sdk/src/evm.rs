@@ -4,7 +4,7 @@ use super::{CircuitExt, PlonkVerifier};
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs::{
-    halo2curves::bn256::{Bn256, Fq, Fr, G1Affine},
+    halo2curves::bls12_381::{Bls12, Fq, Fr, G1Affine},
     plonk::{create_proof, verify_proof, Circuit, ProvingKey, VerifyingKey},
     poly::{
         commitment::{ParamsProver, Prover, Verifier},
@@ -34,19 +34,19 @@ use std::{fs, io, path::Path, rc::Rc};
 
 /// Generates a proof for evm verification using either SHPLONK or GWC proving method. Uses Keccak for Fiat-Shamir.
 pub fn gen_evm_proof<'params, C, P, V>(
-    params: &'params ParamsKZG<Bn256>,
+    params: &'params ParamsKZG<Bls12>,
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
 ) -> Vec<u8>
 where
     C: Circuit<Fr>,
-    P: Prover<'params, KZGCommitmentScheme<Bn256>>,
+    P: Prover<'params, KZGCommitmentScheme<Bls12>>,
     V: Verifier<
         'params,
-        KZGCommitmentScheme<Bn256>,
-        Guard = GuardKZG<'params, Bn256>,
-        MSMAccumulator = DualMSM<'params, Bn256>,
+        KZGCommitmentScheme<Bls12>,
+        Guard = GuardKZG<'params, Bls12>,
+        MSMAccumulator = DualMSM<'params, Bls12>,
     >,
 {
     let instances = instances.iter().map(|instances| instances.as_slice()).collect_vec();
@@ -56,7 +56,7 @@ where
     let rng = StdRng::from_entropy();
     let proof = {
         let mut transcript = TranscriptWriterBuffer::<_, G1Affine, _>::init(Vec::new());
-        create_proof::<KZGCommitmentScheme<Bn256>, P, _, _, EvmTranscript<_, _, _, _>, _>(
+        create_proof::<KZGCommitmentScheme<Bls12>, P, _, _, EvmTranscript<_, _, _, _>, _>(
             params,
             pk,
             &[circuit],
@@ -89,7 +89,7 @@ where
 }
 
 pub fn gen_evm_proof_gwc<'params, C: Circuit<Fr>>(
-    params: &'params ParamsKZG<Bn256>,
+    params: &'params ParamsKZG<Bls12>,
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
@@ -98,7 +98,7 @@ pub fn gen_evm_proof_gwc<'params, C: Circuit<Fr>>(
 }
 
 pub fn gen_evm_proof_shplonk<'params, C: Circuit<Fr>>(
-    params: &'params ParamsKZG<Bn256>,
+    params: &'params ParamsKZG<Bls12>,
     pk: &'params ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
@@ -117,7 +117,7 @@ pub trait EvmKzgAccumulationScheme:
         Rc<EvmLoader>,
         VerifyingKey = KzgAsVerifyingKey,
         Accumulator = KzgAccumulator<G1Affine, Rc<EvmLoader>>,
-    > + AccumulationDecider<G1Affine, Rc<EvmLoader>, DecidingKey = KzgDecidingKey<Bn256>>
+    > + AccumulationDecider<G1Affine, Rc<EvmLoader>, DecidingKey = KzgDecidingKey<Bls12>>
 {
 }
 
@@ -125,7 +125,7 @@ impl EvmKzgAccumulationScheme for crate::GWC {}
 impl EvmKzgAccumulationScheme for crate::SHPLONK {}
 
 pub fn gen_evm_verifier_sol_code<C, AS>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
 ) -> String
@@ -155,7 +155,7 @@ where
 }
 
 pub fn gen_evm_verifier<C, AS>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
     path: Option<&Path>,
@@ -174,7 +174,7 @@ where
 }
 
 pub fn gen_evm_verifier_gwc<C: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
     path: Option<&Path>,
@@ -183,7 +183,7 @@ pub fn gen_evm_verifier_gwc<C: CircuitExt<Fr>>(
 }
 
 pub fn gen_evm_verifier_shplonk<C: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
     path: Option<&Path>,

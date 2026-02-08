@@ -3,7 +3,7 @@ use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs::{self};
 use halo2_proofs::{
     halo2curves::{
-        bn256::{Bn256, Fr, G1Affine},
+        bls12_381::{Bls12, Fr, G1Affine},
         group::ff::Field,
     },
     plonk::{keygen_pk, keygen_vk, Circuit, ProvingKey, Selector},
@@ -30,18 +30,18 @@ pub mod evm;
 #[cfg(feature = "loader_halo2")]
 pub mod halo2;
 
-pub const LIMBS: usize = 3;
-pub const BITS: usize = 88;
+pub const LIMBS: usize = 6;
+pub const BITS: usize = 64;
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1MB
 
 /// AS stands for accumulation scheme.
-/// AS can be either `Kzg<Bn256, Gwc19>` (the original PLONK KZG multi-open) or `Kzg<Bn256, Bdfg21>` (SHPLONK)
+/// AS can be either `Kzg<Bls12, Gwc19>` (the original PLONK KZG multi-open) or `Kzg<Bls12, Bdfg21>` (SHPLONK)
 pub type PlonkVerifier<AS> = verifier::plonk::PlonkVerifier<AS, LimbsEncoding<LIMBS, BITS>>;
 pub type PlonkSuccinctVerifier<AS> =
     verifier::plonk::PlonkSuccinctVerifier<AS, LimbsEncoding<LIMBS, BITS>>;
-pub type SHPLONK = KzgAs<Bn256, Bdfg21>;
-pub type GWC = KzgAs<Bn256, Gwc19>;
+pub type SHPLONK = KzgAs<Bls12, Bdfg21>;
+pub type GWC = KzgAs<Bls12, Gwc19>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snark {
@@ -108,7 +108,7 @@ pub fn read_pk_with_capacity<C: Circuit<Fr>>(
 
 #[allow(clippy::let_and_return)]
 pub fn gen_pk<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>, // TODO: read pk without params
+    params: &ParamsKZG<Bls12>, // TODO: read pk without params
     circuit: &C,
     path: Option<&Path>,
 ) -> ProvingKey<G1Affine> {

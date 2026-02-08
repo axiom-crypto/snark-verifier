@@ -1,5 +1,5 @@
 use halo2_base::halo2_proofs::{
-    halo2curves::bn256::{Bn256, Fr, G1Affine},
+    halo2curves::bls12_381::{Bls12, Fr, G1Affine},
     plonk::{Circuit, VerifyingKey},
     poly::kzg::commitment::ParamsKZG,
 };
@@ -33,7 +33,7 @@ pub struct AggregationDependencyIntentOwned {
 
 impl AggregationDependencyIntent<'_> {
     /// Converts `self` into `PlonkProtocol`
-    pub fn compile(self, params: &ParamsKZG<Bn256>) -> PlonkProtocol<G1Affine> {
+    pub fn compile(self, params: &ParamsKZG<Bls12>) -> PlonkProtocol<G1Affine> {
         compile(
             params,
             self.vk,

@@ -11,7 +11,7 @@ use halo2_base::{
     },
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
-        halo2curves::bn256::{Bn256, Fr, G1Affine},
+        halo2curves::bls12_381::{Bls12, Fq, Fr, G1Affine},
         plonk::{self, Circuit, ConstraintSystem, Selector},
         poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
     },
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use snark_verifier::{
     loader::{
         self,
-        halo2::halo2_ecc::{self, bigint::ProperCrtUint, bn254::FpChip},
+        halo2::halo2_ecc::{self, bigint::ProperCrtUint, fields::fp::FpChip},
         native::NativeLoader,
     },
     pcs::{
@@ -422,7 +422,7 @@ where
     };
 
     // create halo2loader
-    let fp_chip = FpChip::<Fr>::new(range, BITS, LIMBS);
+    let fp_chip = FpChip::<Fr, Fq>::new(range, BITS, LIMBS);
     let ecc_chip = BaseFieldEccChip::new(&fp_chip);
     // `pool` needs to be owned by loader.
     // We put it back later (below), so it should have same effect as just mutating `pool`.
@@ -497,7 +497,7 @@ impl AggregationCircuit {
     pub fn new<AS>(
         stage: CircuitBuilderStage,
         config_params: AggregationConfigParams,
-        params: &ParamsKZG<Bn256>,
+        params: &ParamsKZG<Bls12>,
         snarks: impl IntoIterator<Item = Snark>,
         universality: VerifierUniversality,
     ) -> Self

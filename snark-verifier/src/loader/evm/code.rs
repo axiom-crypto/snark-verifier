@@ -1,8 +1,8 @@
 pub enum Precompiled {
     BigModExp = 0x05,
-    Bn254Add = 0x6,
-    Bn254ScalarMul = 0x7,
-    Bn254Pairing = 0x8,
+    Bls12_381G1Add = 0x0a,
+    Bls12_381G1Msm = 0x0b,
+    Bls12_381Pairing = 0x0e,
 }
 
 #[derive(Clone, Debug)]
@@ -16,7 +16,7 @@ impl SolidityAssemblyCode {
         Self { runtime: String::new() }
     }
 
-    pub fn code(&self, base_modulus: String, scalar_modulus: String) -> String {
+    pub fn code(&self, scalar_modulus: String) -> String {
         format!(
             "
 // SPDX-License-Identifier: MIT
@@ -33,23 +33,7 @@ contract Halo2Verifier {{
             }}
 
             let success := true
-            let f_p := {base_modulus}
             let f_q := {scalar_modulus}
-            function validate_ec_point(x, y) -> valid {{
-                {{
-                    let x_lt_p := lt(x, {base_modulus})
-                    let y_lt_p := lt(y, {base_modulus})
-                    valid := and(x_lt_p, y_lt_p)
-                }}
-                {{
-                    let y_square := mulmod(y, y, {base_modulus})
-                    let x_square := mulmod(x, x, {base_modulus})
-                    let x_cube := mulmod(x_square, x, {base_modulus})
-                    let x_cube_plus_3 := addmod(x_cube, 3, {base_modulus})
-                    let is_affine := eq(x_cube_plus_3, y_square)
-                    valid := and(valid, is_affine)
-                }}
-            }}
             {}
         }}
     }}

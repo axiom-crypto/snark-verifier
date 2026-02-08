@@ -108,7 +108,7 @@ where
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
             assert_eq!(self.buf.end(), ptr);
-            self.buf.extend(0x40);
+            self.buf.extend(self.loader.evm_ec_point_bytes());
         } else {
             unreachable!()
         }
@@ -144,7 +144,7 @@ where
 
     fn read_ec_point(&mut self) -> Result<EcPoint, Error> {
         let ec_point = self.loader.calldataload_ec_point(self.stream);
-        self.stream += 0x40;
+        self.stream += self.loader.proof_ec_point_bytes();
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)
     }
