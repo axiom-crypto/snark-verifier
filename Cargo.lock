@@ -1626,7 +1626,6 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.5.1"
-source = "git+https://github.com/jtcoolen/halo2-lib.git?rev=f56347dbc1162d11ba1a52eb2e5501f93445a75d#f56347dbc1162d11ba1a52eb2e5501f93445a75d"
 dependencies = [
  "ark-std 0.3.0",
  "getset",

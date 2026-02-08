@@ -125,6 +125,41 @@ mod evm {
     };
     use std::{fmt::Debug, rc::Rc};
 
+    const BLS_ENCODED_FP_BYTES: usize = 64;
+
+    fn le_component_to_padded_words(component_le: &[u8]) -> [U256; 2] {
+        assert!(component_le.len() <= BLS_ENCODED_FP_BYTES);
+        let mut padded = [0u8; BLS_ENCODED_FP_BYTES];
+        let be = component_le.iter().rev().copied().collect::<Vec<_>>();
+        let offset = BLS_ENCODED_FP_BYTES - be.len();
+        padded[offset..].copy_from_slice(&be);
+        let hi: [u8; 0x20] = padded[..0x20].try_into().unwrap();
+        let lo: [u8; 0x20] = padded[0x20..].try_into().unwrap();
+        [
+            U256::from_be_bytes(hi),
+            U256::from_be_bytes(lo),
+        ]
+    }
+
+    fn g2_to_words<C: CurveAffine>(ec_point: C) -> Vec<U256> {
+        let coordinates = ec_point.coordinates().unwrap();
+        let x = coordinates.x().to_repr();
+        let y = coordinates.y().to_repr();
+
+        // Keep the existing c1,c0 ordering expected by precompiles:
+        // second half first, then first half.
+        let x = x.as_ref();
+        let y = y.as_ref();
+        assert_eq!(x.len() % 2, 0);
+        assert_eq!(y.len() % 2, 0);
+        let x_mid = x.len() / 2;
+        let y_mid = y.len() / 2;
+        [&x[x_mid..], &x[..x_mid], &y[y_mid..], &y[..y_mid]]
+            .into_iter()
+            .flat_map(le_component_to_padded_words)
+            .collect()
+    }
+
     impl<M, MOS> AccumulationDecider<M::G1Affine, Rc<EvmLoader>> for KzgAs<M, MOS>
     where
         M: MultiMillerLoop,
@@ -140,18 +175,8 @@ mod evm {
             KzgAccumulator { lhs, rhs }: KzgAccumulator<M::G1Affine, Rc<EvmLoader>>,
         ) -> Result<(), Error> {
             let loader = lhs.loader();
-            let [g2, minus_s_g2] = [dk.g2, -dk.s_g2].map(|ec_point| {
-                let coordinates = ec_point.coordinates().unwrap();
-                let x = coordinates.x().to_repr();
-                let y = coordinates.y().to_repr();
-                (
-                    U256::try_from_le_slice(&x.as_ref()[32..]).unwrap(),
-                    U256::try_from_le_slice(&x.as_ref()[..32]).unwrap(),
-                    U256::try_from_le_slice(&y.as_ref()[32..]).unwrap(),
-                    U256::try_from_le_slice(&y.as_ref()[..32]).unwrap(),
-                )
-            });
-            loader.pairing(&lhs, g2, &rhs, minus_s_g2);
+            let [g2, minus_s_g2] = [dk.g2, -dk.s_g2].map(g2_to_words);
+            loader.pairing(&lhs, &g2, &rhs, &minus_s_g2);
             Ok(())
         }
 

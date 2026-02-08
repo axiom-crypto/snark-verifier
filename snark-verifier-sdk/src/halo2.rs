@@ -6,7 +6,7 @@ pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
 use halo2_proofs::{
     circuit::Layouter,
     halo2curves::{
-        bn256::{Bn256, Fr, G1Affine},
+        bls12_381::{Bls12, Fr, G1Affine},
         group::ff::Field,
     },
     plonk::{
@@ -49,12 +49,12 @@ pub mod aggregation;
 pub mod utils;
 
 // Poseidon parameters
-// We use the same ones Scroll uses for security: https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/bn256/fp.rs
-// Verify generated constants: https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/bn256/mod.rs#L65
+// We use the same ones Scroll uses for security: https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/Bls12/fp.rs
+// Verify generated constants: https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/Bls12/mod.rs#L65
 const T: usize = 3;
 const RATE: usize = 2;
 const R_F: usize = 8; // https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/p128pow5t3.rs#L26
-const R_P: usize = 57; // https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/bn256/mod.rs#L8
+const R_P: usize = 57; // https://github.com/scroll-tech/poseidon-circuit/blob/714f50c7572a4ff6f2b1fa51a9604a99cd7b6c71/src/poseidon/primitives/Bls12/mod.rs#L8
 const SECURE_MDS: usize = 0;
 
 pub type PoseidonTranscript<L, S> =
@@ -77,8 +77,8 @@ lazy_static! {
 ///
 /// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_proof<'params, C, P, V>(
-    // TODO: pass Option<&'params ParamsKZG<Bn256>> but hard to get lifetimes to work with `Cow`
-    params: &'params ParamsKZG<Bn256>,
+    // TODO: pass Option<&'params ParamsKZG<Bls12>> but hard to get lifetimes to work with `Cow`
+    params: &'params ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
@@ -86,12 +86,12 @@ pub fn gen_proof<'params, C, P, V>(
 ) -> Vec<u8>
 where
     C: Circuit<Fr>,
-    P: Prover<'params, KZGCommitmentScheme<Bn256>>,
+    P: Prover<'params, KZGCommitmentScheme<Bls12>>,
     V: Verifier<
         'params,
-        KZGCommitmentScheme<Bn256>,
-        Guard = GuardKZG<'params, Bn256>,
-        MSMAccumulator = DualMSM<'params, Bn256>,
+        KZGCommitmentScheme<Bls12>,
+        Guard = GuardKZG<'params, Bls12>,
+        MSMAccumulator = DualMSM<'params, Bls12>,
     >,
 {
     if let Some((instance_path, proof_path)) = path {
@@ -156,7 +156,7 @@ where
 ///
 /// Caches the instances and proof if `path = Some(instance_path, proof_path)` is specified.
 pub fn gen_proof_gwc<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
@@ -169,7 +169,7 @@ pub fn gen_proof_gwc<C: Circuit<Fr>>(
 ///
 /// Caches the instances and proof if `path` is specified.
 pub fn gen_proof_shplonk<C: Circuit<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: C,
     instances: Vec<Vec<Fr>>,
@@ -183,19 +183,19 @@ pub fn gen_proof_shplonk<C: Circuit<Fr>>(
 /// Tries to first deserialize from / later serialize the entire SNARK into `path` if specified.
 /// Serialization is done using `bincode`.
 pub fn gen_snark<'params, ConcreteCircuit, P, V>(
-    params: &'params ParamsKZG<Bn256>,
+    params: &'params ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     path: Option<impl AsRef<Path>>,
 ) -> Snark
 where
     ConcreteCircuit: CircuitExt<Fr>,
-    P: Prover<'params, KZGCommitmentScheme<Bn256>>,
+    P: Prover<'params, KZGCommitmentScheme<Bls12>>,
     V: Verifier<
         'params,
-        KZGCommitmentScheme<Bn256>,
-        Guard = GuardKZG<'params, Bn256>,
-        MSMAccumulator = DualMSM<'params, Bn256>,
+        KZGCommitmentScheme<Bls12>,
+        Guard = GuardKZG<'params, Bls12>,
+        MSMAccumulator = DualMSM<'params, Bls12>,
     >,
 {
     if let Some(path) = &path {
@@ -232,7 +232,7 @@ where
 /// Tries to first deserialize from / later serialize the entire SNARK into `path` if specified.
 /// Serialization is done using `bincode`.
 pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     path: Option<impl AsRef<Path>>,
@@ -245,7 +245,7 @@ pub fn gen_snark_gwc<ConcreteCircuit: CircuitExt<Fr>>(
 /// Tries to first deserialize from / later serialize the entire SNARK into `path` if specified.
 /// Serialization is done using `bincode`.
 pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     pk: &ProvingKey<G1Affine>,
     circuit: ConcreteCircuit,
     path: Option<impl AsRef<Path>>,
@@ -281,7 +281,7 @@ impl NativeKzgAccumulationScheme for crate::SHPLONK {}
 
 // copied from snark_verifier --example recursion
 pub fn gen_dummy_snark<ConcreteCircuit, AS>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: Option<&VerifyingKey<G1Affine>>,
     num_instance: Vec<usize>,
     circuit_params: ConcreteCircuit::Params,
@@ -369,7 +369,7 @@ where
 ///
 /// Note that this function does not need to know the concrete `Circuit` type.
 pub fn gen_dummy_snark_from_vk<AS>(
-    params: &ParamsKZG<Bn256>,
+    params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
     accumulator_indices: Option<Vec<(usize, usize)>>,

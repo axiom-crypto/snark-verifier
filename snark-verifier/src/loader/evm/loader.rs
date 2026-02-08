@@ -23,6 +23,9 @@ use std::{
 
 /// Memory pointer starts at 0x80, which is the end of the Solidity memory layout scratch space.
 pub const MEM_PTR_START: usize = 0x80;
+const BLS_ENCODED_FP_BYTES: usize = 0x40;
+const BLS_G1_BYTES: usize = 2 * BLS_ENCODED_FP_BYTES;
+const BLS_G2_BYTES: usize = 4 * BLS_ENCODED_FP_BYTES;
 
 #[derive(Clone, Debug)]
 pub enum Value<T> {
@@ -53,8 +56,8 @@ impl<T: Debug> Value<T> {
 /// `Loader` implementation for generating yul code as EVM verifier.
 #[derive(Clone, Debug)]
 pub struct EvmLoader {
-    base_modulus: U256,
     scalar_modulus: U256,
+    base_field_bytes: usize,
     code: RefCell<SolidityAssemblyCode>,
     ptr: RefCell<usize>,
     cache: RefCell<HashMap<String, usize>>,
@@ -64,20 +67,41 @@ fn hex_encode_u256(value: &U256) -> String {
     format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
 }
 
+fn be_bytes_to_u256(bytes: &[u8]) -> U256 {
+    let word: [u8; 32] = bytes.try_into().expect("word must be 32 bytes");
+    U256::from_be_bytes(word)
+}
+
+fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
+    assert!(bytes_le.len() <= BLS_ENCODED_FP_BYTES);
+    let mut padded = [0u8; BLS_ENCODED_FP_BYTES];
+    let be = bytes_le.iter().rev().copied().collect_vec();
+    let offset = BLS_ENCODED_FP_BYTES - be.len();
+    padded[offset..].copy_from_slice(&be);
+    [
+        be_bytes_to_u256(&padded[..0x20]),
+        be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES]),
+    ]
+}
+
 impl EvmLoader {
     /// Initialize a [`EvmLoader`] with base and scalar field.
     pub fn new<Base, Scalar>() -> Rc<Self>
     where
-        Base: PrimeField<Repr = [u8; 0x20]>,
+        Base: PrimeField,
         Scalar: PrimeField<Repr = [u8; 32]>,
     {
-        let base_modulus = modulus::<Base>();
+        let base_field_bytes = Base::Repr::default().as_ref().len();
+        assert!(
+            base_field_bytes <= BLS_ENCODED_FP_BYTES,
+            "Base field encoding length must be <= 64 bytes"
+        );
         let scalar_modulus = modulus::<Scalar>();
         let code = SolidityAssemblyCode::new();
 
         Rc::new(Self {
-            base_modulus,
             scalar_modulus,
+            base_field_bytes,
             code: RefCell::new(code),
             ptr: RefCell::new(MEM_PTR_START),
             cache: Default::default(),
@@ -95,9 +119,7 @@ impl EvmLoader {
             return(0, 0)"
             .to_string();
         self.code.borrow_mut().runtime_append(code);
-        self.code
-            .borrow()
-            .code(hex_encode_u256(&self.base_modulus), hex_encode_u256(&self.scalar_modulus))
+        self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.
@@ -109,6 +131,14 @@ impl EvmLoader {
 
     pub(crate) fn ptr(&self) -> usize {
         *self.ptr.borrow()
+    }
+
+    pub(crate) fn proof_ec_point_bytes(&self) -> usize {
+        2 * self.base_field_bytes
+    }
+
+    pub(crate) fn evm_ec_point_bytes(&self) -> usize {
+        BLS_G1_BYTES
     }
 
     pub(crate) fn code_mut(&self) -> impl DerefMut<Target = SolidityAssemblyCode> + '_ {
@@ -151,20 +181,27 @@ impl EvmLoader {
     /// Calldata load an elliptic curve point and validate it's on affine plane.
     /// Note that identity will cause the verification to fail.
     pub fn calldataload_ec_point(self: &Rc<Self>, offset: usize) -> EcPoint {
-        let x_ptr = self.allocate(0x40);
-        let y_ptr = x_ptr + 0x20;
+        let x_ptr = self.allocate(BLS_G1_BYTES);
+        let y_ptr = x_ptr + BLS_ENCODED_FP_BYTES;
+        let coord_bytes = self.base_field_bytes;
+        let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
         let x_cd_ptr = offset;
-        let y_cd_ptr = offset + 0x20;
-        let validate_code = self.validate_ec_point();
+        let y_cd_ptr = offset + coord_bytes;
         let code = format!(
             "
         {{
-            let x := calldataload({x_cd_ptr:#x})
-            mstore({x_ptr:#x}, x)
-            let y := calldataload({y_cd_ptr:#x})
-            mstore({y_ptr:#x}, y)
-            {validate_code}
+            mstore({x_ptr:#x}, 0)
+            mstore({:#x}, 0)
+            mstore({y_ptr:#x}, 0)
+            mstore({:#x}, 0)
+            calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
+            calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
         }}"
+            ,
+            x_ptr + 0x20,
+            y_ptr + 0x20,
+            x_ptr + pad,
+            y_ptr + pad
         );
         self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(x_ptr))
@@ -176,43 +213,51 @@ impl EvmLoader {
         x_limbs: [&Scalar; LIMBS],
         y_limbs: [&Scalar; LIMBS],
     ) -> EcPoint {
-        let ptr = self.allocate(0x40);
+        let ptr = self.allocate(BLS_G1_BYTES);
         let mut code = String::new();
+        let x_ptr = ptr;
+        code.push_str("let x_lo := 0\n");
+        code.push_str("let x_hi := 0\n");
         for (idx, limb) in x_limbs.iter().enumerate() {
             let limb_i = self.push(limb);
             let shift = idx * BITS;
-            if idx == 0 {
-                code.push_str(format!("let x := {limb_i}\n").as_str());
+            assert!(shift < 512, "limb decomposition exceeds 512 bits");
+            if shift < 256 {
+                code.push_str(format!("x_lo := add(x_lo, shl({shift}, {limb_i}))\n").as_str());
             } else {
-                code.push_str(format!("x := add(x, shl({shift}, {limb_i}))\n").as_str());
+                code.push_str(
+                    format!("x_hi := add(x_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
+                );
             }
         }
-        let x_ptr = ptr;
-        code.push_str(format!("mstore({x_ptr}, x)\n").as_str());
+        code.push_str(format!("mstore({x_ptr:#x}, x_hi)\n").as_str());
+        code.push_str(format!("mstore({:#x}, x_lo)\n", x_ptr + 0x20).as_str());
+
+        let y_ptr = ptr + BLS_ENCODED_FP_BYTES;
+        code.push_str("let y_lo := 0\n");
+        code.push_str("let y_hi := 0\n");
         for (idx, limb) in y_limbs.iter().enumerate() {
             let limb_i = self.push(limb);
             let shift = idx * BITS;
-            if idx == 0 {
-                code.push_str(format!("let y := {limb_i}\n").as_str());
+            assert!(shift < 512, "limb decomposition exceeds 512 bits");
+            if shift < 256 {
+                code.push_str(format!("y_lo := add(y_lo, shl({shift}, {limb_i}))\n").as_str());
             } else {
-                code.push_str(format!("y := add(y, shl({shift}, {limb_i}))\n").as_str());
+                code.push_str(
+                    format!("y_hi := add(y_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
+                );
             }
         }
-        let y_ptr = ptr + 0x20;
-        code.push_str(format!("mstore({y_ptr}, y)\n").as_str());
-        let validate_code = self.validate_ec_point();
+        code.push_str(format!("mstore({y_ptr:#x}, y_hi)\n").as_str());
+        code.push_str(format!("mstore({:#x}, y_lo)\n", y_ptr + 0x20).as_str());
+
         let code = format!(
             "{{
             {code}
-            {validate_code}
         }}"
         );
         self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(ptr))
-    }
-
-    fn validate_ec_point(self: &Rc<Self>) -> String {
-        "success := and(validate_ec_point(x, y), success)".to_string()
     }
 
     pub(crate) fn scalar(self: &Rc<Self>, value: Value<U256>) -> Scalar {
@@ -263,31 +308,23 @@ impl EvmLoader {
 
     /// Allocates a new elliptic curve point and copies the given value into it.
     pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
-        let ptr = self.allocate(0x40);
+        let ptr = self.allocate(BLS_G1_BYTES);
         match value.value {
-            Value::Constant((x, y)) => {
-                let x_ptr = ptr;
-                let y_ptr = ptr + 0x20;
-                let x = hex_encode_u256(&x);
-                let y = hex_encode_u256(&y);
-                let code = format!(
-                    "mstore({x_ptr:#x}, {x})
-                    mstore({y_ptr:#x}, {y})"
-                );
-                self.code.borrow_mut().runtime_append(code);
-            }
             Value::Memory(src_ptr) => {
-                let x_ptr = ptr;
-                let y_ptr = ptr + 0x20;
-                let src_x = src_ptr;
-                let src_y = src_ptr + 0x20;
+                let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
+                let dst_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| ptr + idx * 0x20);
+                let stores = dst_words
+                    .zip(src_words)
+                    .map(|(dst, src)| format!("mstore({dst:#x}, mload({src:#x}))"))
+                    .join("\n");
                 let code = format!(
-                    "mstore({x_ptr:#x}, mload({src_x:#x}))
-                    mstore({y_ptr:#x}, mload({src_y:#x}))"
+                    "{{
+                    {stores}
+                }}"
                 );
                 self.code.borrow_mut().runtime_append(code);
             }
-            Value::Negated(_) | Value::Sum(_, _) | Value::Product(_, _) => {
+            Value::Constant(_) | Value::Negated(_) | Value::Sum(_, _) | Value::Product(_, _) => {
                 unreachable!()
             }
         }
@@ -297,9 +334,12 @@ impl EvmLoader {
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
         let (cd_len, rd_len) = match precompile {
             Precompiled::BigModExp => (0xc0, 0x20),
-            Precompiled::Bn254Add => (0x80, 0x40),
-            Precompiled::Bn254ScalarMul => (0x60, 0x40),
-            Precompiled::Bn254Pairing => (0x180, 0x20),
+            Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
+            // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
+            Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
+            // 2 pairings in one call:
+            //   [G1 (128) || G2 (256)] * 2 = 768 bytes
+            Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
         };
         let a = precompile as usize;
         let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
@@ -324,14 +364,14 @@ impl EvmLoader {
     fn ec_point_add(self: &Rc<Self>, lhs: &EcPoint, rhs: &EcPoint) -> EcPoint {
         let rd_ptr = self.dup_ec_point(lhs).ptr();
         self.dup_ec_point(rhs);
-        self.staticcall(Precompiled::Bn254Add, rd_ptr, rd_ptr);
+        self.staticcall(Precompiled::Bls12_381G1Add, rd_ptr, rd_ptr);
         self.ec_point(Value::Memory(rd_ptr))
     }
 
     fn ec_point_scalar_mul(self: &Rc<Self>, ec_point: &EcPoint, scalar: &Scalar) -> EcPoint {
         let rd_ptr = self.dup_ec_point(ec_point).ptr();
         self.dup_scalar(scalar);
-        self.staticcall(Precompiled::Bn254ScalarMul, rd_ptr, rd_ptr);
+        self.staticcall(Precompiled::Bls12_381G1Msm, rd_ptr, rd_ptr);
         self.ec_point(Value::Memory(rd_ptr))
     }
 
@@ -339,45 +379,52 @@ impl EvmLoader {
     pub fn pairing(
         self: &Rc<Self>,
         lhs: &EcPoint,
-        g2: (U256, U256, U256, U256),
+        g2: &[U256],
         rhs: &EcPoint,
-        minus_s_g2: (U256, U256, U256, U256),
+        minus_s_g2: &[U256],
     ) {
+        assert_eq!(
+            g2.len(),
+            BLS_G2_BYTES / 0x20,
+            "g2 must contain exactly 8 words (256 bytes)"
+        );
+        assert_eq!(
+            minus_s_g2.len(),
+            BLS_G2_BYTES / 0x20,
+            "minus_s_g2 must contain exactly 8 words (256 bytes)"
+        );
+
         let rd_ptr = self.dup_ec_point(lhs).ptr();
-        self.allocate(0x80);
-        let g2_0 = hex_encode_u256(&g2.0);
-        let g2_0_ptr = rd_ptr + 0x40;
-        let g2_1 = hex_encode_u256(&g2.1);
-        let g2_1_ptr = rd_ptr + 0x60;
-        let g2_2 = hex_encode_u256(&g2.2);
-        let g2_2_ptr = rd_ptr + 0x80;
-        let g2_3 = hex_encode_u256(&g2.3);
-        let g2_3_ptr = rd_ptr + 0xa0;
-        let code = format!(
-            "mstore({g2_0_ptr:#x}, {g2_0})
-            mstore({g2_1_ptr:#x}, {g2_1})
-            mstore({g2_2_ptr:#x}, {g2_2})
-            mstore({g2_3_ptr:#x}, {g2_3})"
-        );
-        self.code.borrow_mut().runtime_append(code);
+        self.allocate(BLS_G2_BYTES);
+        let g2_code = g2
+            .iter()
+            .enumerate()
+            .map(|(idx, word)| {
+                format!(
+                    "mstore({:#x}, {})",
+                    rd_ptr + BLS_G1_BYTES + idx * 0x20,
+                    hex_encode_u256(word)
+                )
+            })
+            .join("\n");
+        self.code.borrow_mut().runtime_append(g2_code);
+
         self.dup_ec_point(rhs);
-        self.allocate(0x80);
-        let minus_s_g2_0 = hex_encode_u256(&minus_s_g2.0);
-        let minus_s_g2_0_ptr = rd_ptr + 0x100;
-        let minus_s_g2_1 = hex_encode_u256(&minus_s_g2.1);
-        let minus_s_g2_1_ptr = rd_ptr + 0x120;
-        let minus_s_g2_2 = hex_encode_u256(&minus_s_g2.2);
-        let minus_s_g2_2_ptr = rd_ptr + 0x140;
-        let minus_s_g2_3 = hex_encode_u256(&minus_s_g2.3);
-        let minus_s_g2_3_ptr = rd_ptr + 0x160;
-        let code = format!(
-            "mstore({minus_s_g2_0_ptr:#x}, {minus_s_g2_0})
-            mstore({minus_s_g2_1_ptr:#x}, {minus_s_g2_1})
-            mstore({minus_s_g2_2_ptr:#x}, {minus_s_g2_2})
-            mstore({minus_s_g2_3_ptr:#x}, {minus_s_g2_3})"
-        );
-        self.code.borrow_mut().runtime_append(code);
-        self.staticcall(Precompiled::Bn254Pairing, rd_ptr, rd_ptr);
+        self.allocate(BLS_G2_BYTES);
+        let minus_s_g2_code = minus_s_g2
+            .iter()
+            .enumerate()
+            .map(|(idx, word)| {
+                format!(
+                    "mstore({:#x}, {})",
+                    rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
+                    hex_encode_u256(word)
+                )
+            })
+            .join("\n");
+        self.code.borrow_mut().runtime_append(minus_s_g2_code);
+
+        self.staticcall(Precompiled::Bls12_381Pairing, rd_ptr, rd_ptr);
         let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
         self.code.borrow_mut().runtime_append(code);
     }
@@ -643,9 +690,29 @@ where
 
     fn ec_point_load_const(&self, value: &C) -> EcPoint {
         let coordinates = value.coordinates().unwrap();
-        let [x, y] = [coordinates.x(), coordinates.y()]
-            .map(|coordinate| U256::try_from_le_slice(coordinate.to_repr().as_ref()).unwrap());
-        self.ec_point(Value::Constant((x, y)))
+        let [x_words, y_words] = [coordinates.x(), coordinates.y()]
+            .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref()));
+
+        let ptr = self.allocate(BLS_G1_BYTES);
+        let code = format!(
+            "
+        {{
+            mstore({:#x}, {})
+            mstore({:#x}, {})
+            mstore({:#x}, {})
+            mstore({:#x}, {})
+        }}",
+            ptr,
+            hex_encode_u256(&x_words[0]),
+            ptr + 0x20,
+            hex_encode_u256(&x_words[1]),
+            ptr + BLS_ENCODED_FP_BYTES,
+            hex_encode_u256(&y_words[0]),
+            ptr + BLS_ENCODED_FP_BYTES + 0x20,
+            hex_encode_u256(&y_words[1]),
+        );
+        self.code.borrow_mut().runtime_append(code);
+        self.ec_point(Value::Memory(ptr))
     }
 
     fn ec_point_assert_eq(&self, _: &str, _: &EcPoint, _: &EcPoint) {
