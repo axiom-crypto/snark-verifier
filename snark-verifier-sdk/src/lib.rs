@@ -30,8 +30,10 @@ pub mod evm;
 #[cfg(feature = "loader_halo2")]
 pub mod halo2;
 
-pub const LIMBS: usize = 6;
-pub const BITS: usize = 64;
+// For BLS12-381 base field arithmetic over Fr in halo2-ecc, limb bits must satisfy:
+// BITS + Fr::NUM_BITS - Fq::NUM_BITS - 2 >= 0. With Fr=255 and Fq=381 this means BITS >= 128.
+pub const LIMBS: usize = 3;
+pub const BITS: usize = 128;
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1MB
 

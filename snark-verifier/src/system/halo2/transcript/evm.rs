@@ -1,7 +1,6 @@
 //! Transcript for verifier on EVM.
 
 use crate::halo2_proofs;
-use crate::loader::evm::loader::MEM_PTR_START;
 use crate::{
     loader::{
         evm::{loader::Value, u256_to_fe, util::MemoryChunk, EcPoint, EvmLoader, Scalar, U256},
@@ -42,7 +41,6 @@ where
     /// u256 for `transcript_initial_state`.
     pub fn new(loader: &Rc<EvmLoader>) -> Self {
         let ptr = loader.allocate(0x20);
-        assert_eq!(ptr, MEM_PTR_START);
         let mut buf = MemoryChunk::new(ptr);
         buf.extend(0x20);
         Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
@@ -117,8 +115,14 @@ where
 
     fn common_scalar(&mut self, scalar: &Scalar) -> Result<(), Error> {
         match scalar.value() {
-            Value::Constant(_) if self.buf.ptr() == MEM_PTR_START => {
+            Value::Constant(_) if self.buf.len() == 0x20 => {
                 self.loader.copy_scalar(scalar, self.buf.ptr());
+            }
+            Value::Constant(_) => {
+                let ptr = self.loader.allocate(0x20);
+                assert_eq!(self.buf.end(), ptr);
+                self.loader.copy_scalar(scalar, ptr);
+                self.buf.extend(0x20);
             }
             Value::Memory(ptr) => {
                 assert_eq!(self.buf.end(), ptr);
@@ -189,7 +193,15 @@ where
             })?;
 
         [coordinates.x(), coordinates.y()].map(|coordinate| {
-            self.buf.extend(coordinate.to_repr().as_ref().iter().rev().cloned());
+            let repr = coordinate.to_repr();
+            let repr = repr.as_ref();
+            let encoded_len = match repr.len() {
+                0..=0x20 => 0x20,
+                0x21..=0x40 => 0x40,
+                _ => unreachable!("unsupported base-field encoding length: {}", repr.len()),
+            };
+            self.buf.extend(iter::repeat(0).take(encoded_len - repr.len()));
+            self.buf.extend(repr.iter().rev().copied());
         });
 
         Ok(())
