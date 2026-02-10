@@ -6,7 +6,9 @@ use halo2_proofs::{halo2curves::bls12_381::Bls12, poly::kzg::commitment::ParamsK
 use rand::rngs::OsRng;
 #[cfg(feature = "revm")]
 use snark_verifier_sdk::evm::evm_verify;
-use snark_verifier_sdk::evm::{gen_evm_proof_gwc, gen_evm_verifier_gwc, write_calldata};
+use snark_verifier_sdk::evm::{
+    gen_evm_proof_gwc, gen_evm_verifier_gwc, write_calldata,
+};
 use snark_verifier_sdk::{gen_pk, CircuitExt};
 
 mod application {
@@ -111,40 +113,29 @@ fn main() {
 
     let pk = gen_pk(&params, &circuit, None);
     let proof = gen_evm_proof_gwc(&params, &pk, circuit, instances.clone());
-
     let deployment_code = gen_evm_verifier_gwc::<application::StandardPlonk>(
         &params,
         pk.get_vk(),
         num_instance,
-        Some(Path::new("examples/StandardPlonkVerifier.sol")),
+        Some(Path::new("examples/e2e_smoke_verifier.sol")),
     );
 
-    let deployment_bytecode = format!("0x{}", hex::encode(&deployment_code));
-    std::fs::write("examples/standard_plonk.bytecode", &deployment_bytecode).unwrap();
+    let bytecode_hex = format!("0x{}", hex::encode(&deployment_code));
+    std::fs::write("examples/e2e_smoke.bytecode", &bytecode_hex).unwrap();
     let calldata =
-        write_calldata(&instances, &proof, Path::new("examples/standard_plonk.calldata")).unwrap();
+        write_calldata(&instances, &proof, Path::new("examples/e2e_smoke.calldata")).unwrap();
 
-    println!("proof size: {}", proof.len());
-    println!("deployment code len: {}", deployment_code.len());
-    println!("wrote examples/standard_plonk.bytecode");
-    println!("wrote examples/standard_plonk.calldata ({} hex chars)", calldata.len());
+    println!("proof bytes: {}", proof.len());
+    println!("bytecode bytes: {}", deployment_code.len());
+    println!("calldata hex chars: {}", calldata.len());
+    println!("wrote examples/e2e_smoke_verifier.sol");
+    println!("wrote examples/e2e_smoke.bytecode");
+    println!("wrote examples/e2e_smoke.calldata");
 
     #[cfg(feature = "revm")]
     {
-        if std::env::var("RUN_REVM").ok().as_deref() == Some("1") {
-            match evm_verify(deployment_code, instances, proof) {
-                Ok(gas_cost) => println!("gas cost: {}", gas_cost),
-                Err(err) => {
-                    println!("revm verification failed: {}", err);
-                    println!(
-                        "note: local revm simulation still reverted; validate against a known BLS-enabled client/node for authoritative verification"
-                    );
-                }
-            }
-        } else {
-            println!(
-                "revm verification skipped (set RUN_REVM=1 to run local revm simulation)"
-            );
-        }
+        let gas_cost =
+            evm_verify(deployment_code, instances, proof).expect("evm_verify should succeed");
+        println!("revm gas: {}", gas_cost);
     }
 }

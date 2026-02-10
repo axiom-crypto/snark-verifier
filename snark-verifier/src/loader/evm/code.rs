@@ -1,8 +1,9 @@
 pub enum Precompiled {
     BigModExp = 0x05,
-    Bls12_381G1Add = 0x0a,
-    Bls12_381G1Msm = 0x0b,
-    Bls12_381Pairing = 0x0e,
+    // EIP-2537 (Prague): BLS12-381 precompile addresses.
+    Bls12_381G1Add = 0x0b,
+    Bls12_381G1Msm = 0x0c,
+    Bls12_381Pairing = 0x0f,
 }
 
 #[derive(Clone, Debug)]
