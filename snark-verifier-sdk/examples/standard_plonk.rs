@@ -19,8 +19,12 @@ mod application {
     use rand::RngCore;
     use snark_verifier_sdk::CircuitExt;
 
+    const NUM_ADVICE_COLUMNS: usize = 16;
+
     #[derive(Clone, Copy)]
     pub struct StandardPlonkConfig {
+        #[allow(dead_code)]
+        advice: [Column<Advice>; NUM_ADVICE_COLUMNS],
         a: Column<Advice>,
         q_a: Column<Fixed>,
         instance: Column<Instance>,
@@ -28,10 +32,13 @@ mod application {
 
     impl StandardPlonkConfig {
         fn configure(meta: &mut ConstraintSystem<Fr>) -> Self {
-            let a = meta.advice_column();
+            let advice = [(); NUM_ADVICE_COLUMNS].map(|_| meta.advice_column());
+            let a = advice[0];
             let q_a = meta.fixed_column();
             let instance = meta.instance_column();
-            meta.enable_equality(a);
+            for column in advice {
+                meta.enable_equality(column);
+            }
 
             meta.create_gate("q_a * a + instance = 0", |meta| {
                 let a = meta.query_advice(a, Rotation::cur());
@@ -40,7 +47,7 @@ mod application {
                 Some(q_a * a + instance)
             });
 
-            StandardPlonkConfig { a, q_a, instance }
+            StandardPlonkConfig { advice, a, q_a, instance }
         }
     }
 
