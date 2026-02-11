@@ -46,3 +46,7 @@ halo2-base = { path = "vendor/halo2-base" }
 
 [patch.crates-io]
 halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }
+midnight-proofs = { path = "midnight-zk/proofs" }
+midnight-curves = { path = "midnight-zk/curves" }
+midnight-circuits = { path = "midnight-zk/circuits" }
+midnight-zk-stdlib = { path = "midnight-zk/zk_stdlib" }

@@ -35,6 +35,11 @@ anyhow = { version = "1", optional = true }
 
 # Optional bridge into Midnight (halo2 fork) artifacts
 midnight-proofs = { path = "../midnight-zk/proofs", optional = true, default-features = false }
+midnight-curves = { path = "../midnight-zk/curves", optional = true }
+midnight-circuits = { path = "../midnight-zk/circuits", optional = true, features = ["testing"] }
+midnight-zk-stdlib = { path = "../midnight-zk/zk_stdlib", optional = true }
+blake2b_simd = { version = "1", optional = true }
+ff = { version = "0.13", optional = true }
 
 # loader_evm
 ethereum-types = { version = "=0.14.1", default-features = false, features = [
@@ -69,7 +74,15 @@ parallel = ["snark-verifier/parallel"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
-midnight = ["dep:midnight-proofs", "dep:anyhow"]
+midnight = [
+    "dep:midnight-proofs",
+    "dep:midnight-curves",
+    "dep:midnight-circuits",
+    "dep:midnight-zk-stdlib",
+    "dep:blake2b_simd",
+    "dep:ff",
+    "dep:anyhow",
+]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 

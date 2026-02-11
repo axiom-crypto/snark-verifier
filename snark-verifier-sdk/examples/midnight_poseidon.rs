@@ -11,9 +11,11 @@ use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
-use midnight_zk_stdlib::{utils::plonk_api::filecoin_srs, Relation, ZkStdLib, ZkStdLibArch};
+use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use midnight_curves::Bls12;
+use midnight_proofs::poly::kzg::params::ParamsKZG;
 
 type F = midnight_curves::Fq;
 
@@ -59,7 +61,8 @@ impl Relation for PoseidonExample {
 
 fn main() {
     const K: u32 = 6;
-    let srs = filecoin_srs(K);
+    // For demo purposes generate an in-memory SRS instead of downloading Filecoin params.
+    let srs = ParamsKZG::<Bls12>::unsafe_setup(K, OsRng);
 
     let relation = PoseidonExample;
     let vk = midnight_zk_stdlib::setup_vk(&srs, &relation);

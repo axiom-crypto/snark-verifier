@@ -13,14 +13,15 @@
 #![cfg(feature = "midnight")]
 
 use anyhow::{bail, Result};
-use snark_verifier::verifier::plonk::{PlonkProtocol, PlonkProof};
-use snark_verifier::{loader::native::NativeLoader, util::arithmetic::CurveAffine};
+use snark_verifier::verifier::plonk::PlonkProtocol;
+use snark_verifier::util::arithmetic::CurveAffine;
 
 /// Placeholder for a fully converted Midnight proof bundle.
 pub struct MidnightProofBundle<C: CurveAffine> {
     pub protocol: PlonkProtocol<C>,
     pub instances: Vec<Vec<C::Scalar>>,
-    pub proof: PlonkProof<C, NativeLoader, snark_verifier::pcs::kzg::Bdfg21>, // default to SHPLONK; adjust as needed
+    /// Serialized proof bytes (conversion to `PlonkProof` pending).
+    pub proof: Vec<u8>,
 }
 
 impl<C: CurveAffine> MidnightProofBundle<C> {
