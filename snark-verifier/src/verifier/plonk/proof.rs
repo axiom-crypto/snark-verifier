@@ -28,6 +28,8 @@ where
     pub committed_instances: Option<Vec<L::LoadedEcPoint>>,
     /// Commitments of witness polynomials read from transcript.
     pub witnesses: Vec<L::LoadedEcPoint>,
+    /// Additional commitments (e.g. trash argument) read after witnesses.
+    pub extra_commitments: Vec<L::LoadedEcPoint>,
     /// Challenges squeezed from transcript.
     pub challenges: Vec<L::LoadedScalar>,
     /// Quotient commitments read from transcript.
@@ -119,6 +121,13 @@ where
             )
         };
 
+        // Trailing challenges that are not tied to an advice phase (e.g. trash challenge).
+        let mut challenges = challenges;
+        challenges.extend(transcript.squeeze_n_challenges(protocol.trailing_challenges));
+
+        // Extra commitments that appear after challenges (e.g. trash commitments).
+        let extra_commitments = transcript.read_n_ec_points(protocol.extra_commitments)?;
+
         let quotients = transcript.read_n_ec_points(protocol.quotient.num_chunk())?;
 
         let z = transcript.squeeze_challenge();
@@ -143,6 +152,7 @@ where
         Ok(Self {
             committed_instances,
             witnesses,
+            extra_commitments,
             challenges,
             quotients,
             z,
@@ -214,6 +224,7 @@ where
                     }),
             )
             .chain(self.witnesses.iter().map(Msm::base))
+            .chain(self.extra_commitments.iter().map(Msm::base))
             .collect_vec();
 
         let numerator = protocol.quotient.numerator.evaluate(
@@ -252,7 +263,10 @@ where
         )?;
 
         let quotient_query = Query::new(
-            protocol.preprocessed.len() + protocol.num_instance.len() + self.witnesses.len(),
+            protocol.preprocessed.len()
+                + protocol.num_instance.len()
+                + self.witnesses.len()
+                + self.extra_commitments.len(),
             Rotation::cur(),
         );
         let quotient = common_poly_eval

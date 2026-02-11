@@ -31,6 +31,10 @@ ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
 snark-verifier = { version = "=0.2.3", path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
+anyhow = { version = "1", optional = true }
+
+# Optional bridge into Midnight (halo2 fork) artifacts
+midnight-proofs = { path = "../midnight-zk/proofs", optional = true, default-features = false }
 
 # loader_evm
 ethereum-types = { version = "=0.14.1", default-features = false, features = [
@@ -65,6 +69,7 @@ parallel = ["snark-verifier/parallel"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
+midnight = ["dep:midnight-proofs", "dep:anyhow"]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
@@ -98,3 +103,8 @@ halo2-ecc  = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347d
 
 [patch.crates-io]
 halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }
+
+[[example]]
+name = "midnight_poseidon"
+required-features = ["midnight"]
+path = "examples/midnight_poseidon.rs"

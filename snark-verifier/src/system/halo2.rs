@@ -145,6 +145,8 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
         num_instance: polynomials.num_instance(),
         num_witness: polynomials.num_witness(),
         num_challenge: polynomials.num_challenge(),
+        trailing_challenges: 0,
+        extra_commitments: 0,
         evaluations,
         queries,
         quotient: polynomials.quotient(),
