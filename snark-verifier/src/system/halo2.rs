@@ -145,6 +145,8 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
         num_instance: polynomials.num_instance(),
         num_witness: polynomials.num_witness(),
         num_challenge: polynomials.num_challenge(),
+        committed_instance_count: 0,
+        hash_instance_lengths: false,
         trailing_challenges: 0,
         extra_commitments: 0,
         evaluations,
@@ -665,7 +667,12 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             })
             .collect_vec();
         let numerator = Expression::DistributePowers(constraints, self.alpha().into());
-        QuotientPolynomial { chunk_degree: 1, numerator }
+        QuotientPolynomial {
+            chunk_degree: 1,
+            chunk_base: crate::verifier::plonk::protocol::QuotientChunkBase::Zn,
+            num_chunk_override: None,
+            numerator,
+        }
     }
 
     fn accumulator_indices(

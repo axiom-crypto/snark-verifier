@@ -7,6 +7,8 @@ use midnight_circuits::{
     hash::poseidon::PoseidonChip,
     instructions::{hash::HashCPU, AssignmentInstructions, PublicInputInstructions},
 };
+use midnight_curves::Bls12;
+use midnight_proofs::poly::kzg::params::ParamsKZG;
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -14,8 +16,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use midnight_curves::Bls12;
-use midnight_proofs::poly::kzg::params::ParamsKZG;
+use snark_verifier_sdk::midnight_adapter::MidnightProofBundle;
 
 type F = midnight_curves::Fq;
 
@@ -44,10 +45,7 @@ impl Relation for PoseidonExample {
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
-        ZkStdLibArch {
-            poseidon: true,
-            ..ZkStdLibArch::default()
-        }
+        ZkStdLibArch { poseidon: true, ..ZkStdLibArch::default() }
     }
 
     fn write_relation<W: std::io::Write>(&self, _writer: &mut W) -> std::io::Result<()> {
@@ -86,6 +84,17 @@ fn main() {
     )
     .expect("Verification should succeed");
 
-    println!("Poseidon proof generated and verified successfully (Midnight native path).");
-    println!("TODO: map these artifacts into snark-verifier via midnight_adapter once circuit-to-protocol conversion is implemented.");
+    let bundle = MidnightProofBundle::new(
+        srs.verifier_params(),
+        vk.vk().clone(),
+        proof.clone(),
+        vec![vec![instance]],
+    )
+    .expect("Bundle creation should parse and verify natively");
+
+    bundle.verify_with_snark_decider().expect("snark-verifier decider check should succeed");
+    bundle.verify_with_snark_verifier().expect("snark-verifier full path should succeed");
+
+    println!("Poseidon proof generated and verified successfully.");
+    println!("Verified through Midnight native path, snark-verifier decider bridge, and full snark-verifier adapter.");
 }

@@ -13,7 +13,7 @@ use crate::{
     loader::Loader,
     pcs::{
         AccumulationDecider, AccumulationScheme, AccumulatorEncoding, PolynomialCommitmentScheme,
-        Query,
+        Query as PcsQuery,
     },
     util::{
         arithmetic::{CurveAffine, Rotation},
@@ -28,7 +28,9 @@ mod proof;
 pub(crate) mod protocol;
 
 pub use proof::PlonkProof;
-pub use protocol::PlonkProtocol;
+pub use protocol::{
+    CommonPolynomial, Expression, PlonkProtocol, Query, QuotientChunkBase, QuotientPolynomial,
+};
 
 /// Verifier that verifies the cheap part of PLONK and ouput the accumulator.
 #[derive(Debug)]
@@ -147,7 +149,7 @@ where
     L: Loader<C>,
     AS: AccumulationScheme<C, L>
         + PolynomialCommitmentScheme<C, L, Output = AS::Accumulator>
-        + CostEstimation<C, Input = Vec<Query<Rotation>>>,
+        + CostEstimation<C, Input = Vec<PcsQuery<Rotation>>>,
 {
     type Input = PlonkProtocol<C, L>;
 
@@ -175,7 +177,7 @@ where
     L: Loader<C>,
     AS: AccumulationScheme<C, L>
         + PolynomialCommitmentScheme<C, L, Output = AS::Accumulator>
-        + CostEstimation<C, Input = Vec<Query<Rotation>>>,
+        + CostEstimation<C, Input = Vec<PcsQuery<Rotation>>>,
 {
     type Input = PlonkProtocol<C, L>;
 

@@ -9,7 +9,7 @@ use crate::{
     },
     verifier::plonk::protocol::{
         CommonPolynomial::Lagrange, CommonPolynomialEvaluation, LinearizationStrategy,
-        PlonkProtocol, Query,
+        PlonkProtocol, Query, QuotientChunkBase,
     },
     Error,
 };
@@ -50,30 +50,25 @@ where
     L: Loader<C>,
     AS: AccumulationScheme<C, L> + PolynomialCommitmentScheme<C, L, Output = AS::Accumulator>,
 {
-    /// Reads each part from transcript as [`PlonkProof`].
-    pub fn read<T, AE>(
-        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+    fn build_committed_instances<T>(
         protocol: &PlonkProtocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
+        committed_instance_commitments: Option<&[L::LoadedEcPoint]>,
         transcript: &mut T,
-    ) -> Result<Self, Error>
+    ) -> Result<Option<Vec<L::LoadedEcPoint>>, Error>
     where
         T: TranscriptRead<C, L>,
-        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
     {
-        if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
-            transcript.common_scalar(transcript_initial_state)?;
-        }
+        if let Some(ick) = &protocol.instance_committing_key {
+            if committed_instance_commitments.is_some() || protocol.committed_instance_count > 0 {
+                return Err(Error::InvalidProtocol(
+                    "Committed instances cannot be combined with instance committing key"
+                        .to_string(),
+                ));
+            }
 
-        if protocol.num_instance != instances.iter().map(|instances| instances.len()).collect_vec()
-        {
-            return Err(Error::InvalidInstances);
-        }
-
-        let committed_instances = if let Some(ick) = &protocol.instance_committing_key {
             let loader = transcript.loader();
-            let bases =
-                ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
+            let bases = ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
             let constant = ick.constant.as_ref().map(|value| loader.ec_point_load_const(value));
 
             let committed_instances = instances
@@ -92,16 +87,97 @@ where
                 transcript.common_ec_point(committed_instance)?;
             }
 
-            Some(committed_instances)
-        } else {
-            for instances in instances.iter() {
-                for instance in instances.iter() {
-                    transcript.common_scalar(instance)?;
-                }
-            }
+            return Ok(Some(committed_instances));
+        }
 
-            None
-        };
+        let committed_count = protocol.committed_instance_count;
+        if committed_count > protocol.num_instance.len() {
+            return Err(Error::InvalidProtocol(format!(
+                "committed_instance_count {} exceeds num_instance columns {}",
+                committed_count,
+                protocol.num_instance.len()
+            )));
+        }
+
+        let mut full_committed_instances = Vec::new();
+
+        if committed_count > 0 {
+            let committed = committed_instance_commitments.ok_or(Error::InvalidInstances)?;
+            if committed.len() != committed_count {
+                return Err(Error::InvalidInstances);
+            }
+            for commitment in committed.iter() {
+                transcript.common_ec_point(commitment)?;
+            }
+            full_committed_instances.extend(committed.iter().cloned());
+        }
+
+        let loader = transcript.loader().clone();
+        for (column_idx, instances) in instances.iter().enumerate() {
+            if column_idx < committed_count {
+                continue;
+            }
+            if protocol.hash_instance_lengths {
+                let len = loader.load_const(&C::Scalar::from(instances.len() as u64));
+                transcript.common_scalar(&len)?;
+            }
+            for instance in instances.iter() {
+                transcript.common_scalar(instance)?;
+            }
+        }
+
+        if committed_count > 0 {
+            full_committed_instances.extend(
+                (committed_count..protocol.num_instance.len())
+                    .map(|_| loader.ec_point_load_zero()),
+            );
+            Ok(Some(full_committed_instances))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Reads each part from transcript as [`PlonkProof`].
+    pub fn read<T, AE>(
+        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+        protocol: &PlonkProtocol<C, L>,
+        instances: &[Vec<L::LoadedScalar>],
+        transcript: &mut T,
+    ) -> Result<Self, Error>
+    where
+        T: TranscriptRead<C, L>,
+        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
+    {
+        Self::read_with_committed_instances::<T, AE>(svk, protocol, instances, None, transcript)
+    }
+
+    /// Reads each part from transcript while hashing externally provided committed instances.
+    pub fn read_with_committed_instances<T, AE>(
+        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+        protocol: &PlonkProtocol<C, L>,
+        instances: &[Vec<L::LoadedScalar>],
+        committed_instance_commitments: Option<&[L::LoadedEcPoint]>,
+        transcript: &mut T,
+    ) -> Result<Self, Error>
+    where
+        T: TranscriptRead<C, L>,
+        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
+    {
+        if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
+            transcript.common_scalar(transcript_initial_state)?;
+        }
+
+        if protocol.num_instance != instances.iter().map(|instances| instances.len()).collect_vec()
+        {
+            return Err(Error::InvalidInstances);
+        }
+
+        let committed_instances = Self::build_committed_instances(
+            protocol,
+            instances,
+            committed_instance_commitments,
+            transcript,
+        )?;
 
         let (witnesses, challenges) = {
             let (witnesses, challenges) = protocol
@@ -269,9 +345,19 @@ where
                 + self.extra_commitments.len(),
             Rotation::cur(),
         );
-        let quotient = common_poly_eval
-            .zn()
-            .pow_const(protocol.quotient.chunk_degree as u64)
+        let quotient_base = match protocol.quotient.chunk_base {
+            QuotientChunkBase::Zn => common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64),
+            QuotientChunkBase::ZnMinusOne => {
+                let z_inv = common_poly_eval
+                    .get(crate::verifier::plonk::CommonPolynomial::Identity)
+                    .invert()
+                    .ok_or_else(|| {
+                        Error::InvalidProtocol("Missing inverse for quotient split base".to_string())
+                    })?;
+                (common_poly_eval.zn().clone() * &z_inv).pow_const(protocol.quotient.chunk_degree as u64)
+            }
+        };
+        let quotient = quotient_base
             .powers(self.quotients.len())
             .into_iter()
             .zip(self.quotients.iter().map(Msm::base))
