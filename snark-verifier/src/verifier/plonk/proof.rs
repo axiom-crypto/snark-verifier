@@ -68,7 +68,8 @@ where
             }
 
             let loader = transcript.loader();
-            let bases = ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
+            let bases =
+                ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
             let constant = ick.constant.as_ref().map(|value| loader.ec_point_load_const(value));
 
             let committed_instances = instances
@@ -127,10 +128,6 @@ where
         }
 
         if committed_count > 0 {
-            full_committed_instances.extend(
-                (committed_count..protocol.num_instance.len())
-                    .map(|_| loader.ec_point_load_zero()),
-            );
             Ok(Some(full_committed_instances))
         } else {
             Ok(None)
@@ -172,7 +169,7 @@ where
             return Err(Error::InvalidInstances);
         }
 
-        let committed_instances = Self::build_committed_instances(
+        let mut committed_instances = Self::build_committed_instances(
             protocol,
             instances,
             committed_instance_commitments,
@@ -214,6 +211,15 @@ where
             &Self::empty_queries(protocol),
             transcript,
         )?;
+
+        if protocol.committed_instance_count > 0 {
+            if let Some(committed_instances) = committed_instances.as_mut() {
+                committed_instances.extend(
+                    (protocol.committed_instance_count..protocol.num_instance.len())
+                        .map(|_| transcript.loader().ec_point_load_zero()),
+                );
+            }
+        }
 
         let old_accumulators = protocol
             .accumulator_indices
@@ -346,15 +352,20 @@ where
             Rotation::cur(),
         );
         let quotient_base = match protocol.quotient.chunk_base {
-            QuotientChunkBase::Zn => common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64),
+            QuotientChunkBase::Zn => {
+                common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64)
+            }
             QuotientChunkBase::ZnMinusOne => {
                 let z_inv = common_poly_eval
                     .get(crate::verifier::plonk::CommonPolynomial::Identity)
                     .invert()
                     .ok_or_else(|| {
-                        Error::InvalidProtocol("Missing inverse for quotient split base".to_string())
+                        Error::InvalidProtocol(
+                            "Missing inverse for quotient split base".to_string(),
+                        )
                     })?;
-                (common_poly_eval.zn().clone() * &z_inv).pow_const(protocol.quotient.chunk_degree as u64)
+                (common_poly_eval.zn().clone() * &z_inv)
+                    .pow_const(protocol.quotient.chunk_degree as u64)
             }
         };
         let quotient = quotient_base

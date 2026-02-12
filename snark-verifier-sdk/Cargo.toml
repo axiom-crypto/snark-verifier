@@ -40,6 +40,7 @@ midnight-circuits = { path = "../midnight-zk/circuits", optional = true, feature
 midnight-zk-stdlib = { path = "../midnight-zk/zk_stdlib", optional = true }
 blake2b_simd = { version = "1", optional = true }
 ff = { version = "0.13", optional = true }
+sha3 = { version = "=0.10", optional = true }
 
 # loader_evm
 ethereum-types = { version = "=0.14.1", default-features = false, features = [
@@ -81,6 +82,7 @@ midnight = [
     "dep:midnight-zk-stdlib",
     "dep:blake2b_simd",
     "dep:ff",
+    "dep:sha3",
     "dep:anyhow",
 ]
 
@@ -121,3 +123,8 @@ halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev =
 name = "midnight_poseidon"
 required-features = ["midnight"]
 path = "examples/midnight_poseidon.rs"
+
+[[example]]
+name = "midnight_poseidon_evm"
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_poseidon_evm.rs"

@@ -7,7 +7,7 @@ use crate::{
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
     util::{
-        arithmetic::{CurveAffine, FieldOps, PrimeField},
+        arithmetic::{Coordinates, CurveAffine, FieldOps, PrimeField},
         Itertools,
     },
 };
@@ -78,10 +78,7 @@ fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [
-        be_bytes_to_u256(&padded[..0x20]),
-        be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES]),
-    ]
+    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -196,8 +193,7 @@ impl EvmLoader {
             mstore({:#x}, 0)
             calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
             calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}"
-            ,
+        }}",
             x_ptr + 0x20,
             y_ptr + 0x20,
             x_ptr + pad,
@@ -383,11 +379,7 @@ impl EvmLoader {
         rhs: &EcPoint,
         minus_s_g2: &[U256],
     ) {
-        assert_eq!(
-            g2.len(),
-            BLS_G2_BYTES / 0x20,
-            "g2 must contain exactly 8 words (256 bytes)"
-        );
+        assert_eq!(g2.len(), BLS_G2_BYTES / 0x20, "g2 must contain exactly 8 words (256 bytes)");
         assert_eq!(
             minus_s_g2.len(),
             BLS_G2_BYTES / 0x20,
@@ -689,9 +681,12 @@ where
     type LoadedEcPoint = EcPoint;
 
     fn ec_point_load_const(&self, value: &C) -> EcPoint {
-        let coordinates = value.coordinates().unwrap();
-        let [x_words, y_words] = [coordinates.x(), coordinates.y()]
-            .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref()));
+        let [x_words, y_words] = match Option::<Coordinates<C>>::from(value.coordinates()) {
+            Some(coordinates) => [coordinates.x(), coordinates.y()]
+                .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref())),
+            // EVM precompiles encode point-at-infinity as (0, 0).
+            None => [[U256::ZERO, U256::ZERO], [U256::ZERO, U256::ZERO]],
+        };
 
         let ptr = self.allocate(BLS_G1_BYTES);
         let code = format!(

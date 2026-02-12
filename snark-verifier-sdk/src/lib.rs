@@ -31,6 +31,8 @@ pub mod evm;
 pub mod halo2;
 #[cfg(feature = "midnight")]
 pub mod midnight_adapter;
+#[cfg(feature = "midnight")]
+pub mod midnight_evm_transcript;
 
 // For BLS12-381 base field arithmetic over Fr in halo2-ecc, limb bits must satisfy:
 // BITS + Fr::NUM_BITS - Fq::NUM_BITS - 2 >= 0. With Fr=255 and Fq=381 this means BITS >= 128.

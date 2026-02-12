@@ -4129,6 +4129,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 2.3.3",
+ "sha3 0.10.8",
  "snark-verifier",
 ]
 
