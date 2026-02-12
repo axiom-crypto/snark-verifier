@@ -108,14 +108,28 @@ pub fn compile_solidity(code: &str) -> Vec<u8> {
     let mut cmd = Command::new("solc")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null()) // <-- silence solc warnings
+        .stderr(Stdio::piped())
         .arg("--bin")
         .arg("-")
         .spawn()
         .unwrap();
     cmd.stdin.take().unwrap().write_all(code.as_bytes()).unwrap();
-    let output = cmd.wait_with_output().unwrap().stdout;
-    let binary = *split_by_ascii_whitespace(&output).last().unwrap();
+    let output = cmd.wait_with_output().unwrap();
+    if !output.status.success() {
+        panic!(
+            "solc --bin failed (status {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let stdout = output.stdout;
+    let stderr = output.stderr;
+    let binary = *split_by_ascii_whitespace(&stdout)
+        .last()
+        .unwrap_or_else(|| panic!(
+            "solc --bin produced no bytecode output; stderr: {}",
+            String::from_utf8_lossy(&stderr)
+        ));
     assert!(!binary.is_empty());
     hex::decode(binary).unwrap()
 }

@@ -26,6 +26,8 @@ pub const MEM_PTR_START: usize = 0x80;
 const BLS_ENCODED_FP_BYTES: usize = 0x40;
 const BLS_G1_BYTES: usize = 2 * BLS_ENCODED_FP_BYTES;
 const BLS_G2_BYTES: usize = 4 * BLS_ENCODED_FP_BYTES;
+const PROOF_COMPRESSED_SIGN_BYTES: usize = 0x01;
+const COMPRESSED_SCRATCH_MODEXP_BYTES: usize = 0x120;
 
 #[derive(Clone, Debug)]
 pub enum Value<T> {
@@ -58,6 +60,11 @@ impl<T: Debug> Value<T> {
 pub struct EvmLoader {
     scalar_modulus: U256,
     base_field_bytes: usize,
+    base_modulus_words: [U256; 2],
+    base_sqrt_exp_words: [U256; 2],
+    compressed_modexp_input_ptr: usize,
+    compressed_rhs_ptr: usize,
+    compressed_y_sq_ptr: usize,
     code: RefCell<SolidityAssemblyCode>,
     ptr: RefCell<usize>,
     cache: RefCell<HashMap<String, usize>>,
@@ -81,6 +88,26 @@ fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
+fn modulus_u512<F>() -> U512
+where
+    F: PrimeField,
+{
+    let repr = (-F::ONE).to_repr();
+    let repr = repr.as_ref();
+    assert!(
+        repr.len() <= 64,
+        "Field encoding length must be <= 64 bytes for EVM compressed-point support"
+    );
+    let mut le = [0u8; 64];
+    le[..repr.len()].copy_from_slice(repr);
+    U512::from_le_bytes(le) + U512::from(1)
+}
+
+fn u512_to_be_words(value: U512) -> [U256; 2] {
+    let bytes = value.to_be_bytes::<64>();
+    [be_bytes_to_u256(&bytes[..0x20]), be_bytes_to_u256(&bytes[0x20..])]
+}
+
 impl EvmLoader {
     /// Initialize a [`EvmLoader`] with base and scalar field.
     pub fn new<Base, Scalar>() -> Rc<Self>
@@ -94,13 +121,27 @@ impl EvmLoader {
             "Base field encoding length must be <= 64 bytes"
         );
         let scalar_modulus = modulus::<Scalar>();
+        let base_modulus = modulus_u512::<Base>();
+        let base_modulus_words = u512_to_be_words(base_modulus);
+        let base_sqrt_exp_words = u512_to_be_words((base_modulus + U512::from(1)) / U512::from(4));
         let code = SolidityAssemblyCode::new();
+        // Reserve a small fixed scratch area for compressed-point decompression so
+        // transcript allocations remain monotonic and non-overlapping.
+        let compressed_modexp_input_ptr = MEM_PTR_START;
+        let compressed_rhs_ptr = compressed_modexp_input_ptr + COMPRESSED_SCRATCH_MODEXP_BYTES;
+        let compressed_y_sq_ptr = compressed_rhs_ptr + BLS_ENCODED_FP_BYTES;
+        let ptr = compressed_y_sq_ptr + BLS_ENCODED_FP_BYTES;
 
         Rc::new(Self {
             scalar_modulus,
             base_field_bytes,
+            base_modulus_words,
+            base_sqrt_exp_words,
+            compressed_modexp_input_ptr,
+            compressed_rhs_ptr,
+            compressed_y_sq_ptr,
             code: RefCell::new(code),
-            ptr: RefCell::new(MEM_PTR_START),
+            ptr: RefCell::new(ptr),
             cache: Default::default(),
         })
     }
@@ -132,6 +173,10 @@ impl EvmLoader {
 
     pub(crate) fn proof_ec_point_bytes(&self) -> usize {
         2 * self.base_field_bytes
+    }
+
+    pub(crate) fn proof_ec_point_compressed_bytes(&self) -> usize {
+        self.base_field_bytes + PROOF_COMPRESSED_SIGN_BYTES
     }
 
     pub(crate) fn evm_ec_point_bytes(&self) -> usize {
@@ -201,6 +246,176 @@ impl EvmLoader {
         );
         self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(x_ptr))
+    }
+
+    /// Calldata load an elliptic curve point encoded as `[sign_byte || x_coordinate]`,
+    /// where:
+    /// - `sign_byte bit0` encodes whether y is odd,
+    /// - `sign_byte bit1` encodes point-at-infinity.
+    ///
+    /// This decompresses into EIP-2537 uncompressed `(x, y)` form in memory.
+    pub fn calldataload_ec_point_compressed(self: &Rc<Self>, offset: usize) -> EcPoint {
+        let point_ptr = self.allocate(BLS_G1_BYTES);
+        let x_ptr = point_ptr;
+        let y_ptr = point_ptr + BLS_ENCODED_FP_BYTES;
+        let modexp_input_ptr = self.compressed_modexp_input_ptr;
+        let rhs_ptr = self.compressed_rhs_ptr;
+        let y_sq_ptr = self.compressed_y_sq_ptr;
+
+        let coord_bytes = self.base_field_bytes;
+        let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
+        let x_cd_ptr = offset + PROOF_COMPRESSED_SIGN_BYTES;
+
+        let p_hi = hex_encode_u256(&self.base_modulus_words[0]);
+        let p_lo = hex_encode_u256(&self.base_modulus_words[1]);
+        let sqrt_exp_hi = hex_encode_u256(&self.base_sqrt_exp_words[0]);
+        let sqrt_exp_lo = hex_encode_u256(&self.base_sqrt_exp_words[1]);
+
+        let code = format!(
+            "
+        {{
+            let flag := byte(0, calldataload({offset:#x}))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
+            mstore({x_ptr:#x}, 0)
+            mstore({:#x}, 0)
+            mstore({y_ptr:#x}, 0)
+            mstore({:#x}, 0)
+            calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
+
+            let x_hi := mload({x_ptr:#x})
+            let x_lo := mload({:#x})
+
+            if is_inf {{
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }}
+
+            if iszero(is_inf) {{
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, {p_hi}), and(eq(x_hi, {p_hi}), lt(x_lo, {p_lo}))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore({modexp_input_ptr:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, x_hi)
+                mstore({:#x}, x_lo)
+                mstore({:#x}, 0)
+                mstore({:#x}, 3)
+                mstore({:#x}, {p_hi})
+                mstore({:#x}, {p_lo})
+                success := and(
+                    eq(staticcall(gas(), 0x5, {modexp_input_ptr:#x}, 0x120, {rhs_ptr:#x}, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload({rhs_ptr:#x})
+                let rhs_lo0 := mload({:#x})
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, {p_hi}), and(eq(rhs_hi, {p_hi}), iszero(lt(rhs_lo, {p_lo})))) {{
+                    rhs_hi := sub(rhs_hi, {p_hi})
+                    let borrow := lt(rhs_lo, {p_lo})
+                    rhs_lo := sub(rhs_lo, {p_lo})
+                    rhs_hi := sub(rhs_hi, borrow)
+                }}
+                mstore({rhs_ptr:#x}, rhs_hi)
+                mstore({:#x}, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore({modexp_input_ptr:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, rhs_hi)
+                mstore({:#x}, rhs_lo)
+                mstore({:#x}, {sqrt_exp_hi})
+                mstore({:#x}, {sqrt_exp_lo})
+                mstore({:#x}, {p_hi})
+                mstore({:#x}, {p_lo})
+                success := and(
+                    eq(staticcall(gas(), 0x5, {modexp_input_ptr:#x}, 0x120, {y_ptr:#x}, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore({modexp_input_ptr:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, 0x40)
+                mstore({:#x}, mload({y_ptr:#x}))
+                mstore({:#x}, mload({:#x}))
+                mstore({:#x}, 0)
+                mstore({:#x}, 2)
+                mstore({:#x}, {p_hi})
+                mstore({:#x}, {p_lo})
+                success := and(
+                    eq(staticcall(gas(), 0x5, {modexp_input_ptr:#x}, 0x120, {y_sq_ptr:#x}, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload({y_sq_ptr:#x}), mload({rhs_ptr:#x})), success)
+                success := and(eq(mload({:#x}), mload({:#x})), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload({:#x})
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {{
+                    let neg_y_lo := sub({p_lo}, y_lo)
+                    let borrow := lt({p_lo}, y_lo)
+                    let neg_y_hi := sub(sub({p_hi}, mload({y_ptr:#x})), borrow)
+                    mstore({y_ptr:#x}, neg_y_hi)
+                    mstore({:#x}, neg_y_lo)
+                }}
+            }}
+        }}",
+            x_ptr + 0x20,
+            y_ptr + 0x20,
+            x_ptr + pad,
+            x_ptr + 0x20,
+            modexp_input_ptr + 0x20,
+            modexp_input_ptr + 0x40,
+            modexp_input_ptr + 0x60,
+            modexp_input_ptr + 0x80,
+            modexp_input_ptr + 0xa0,
+            modexp_input_ptr + 0xc0,
+            modexp_input_ptr + 0xe0,
+            modexp_input_ptr + 0x100,
+            rhs_ptr + 0x20,
+            rhs_ptr + 0x20,
+            modexp_input_ptr + 0x20,
+            modexp_input_ptr + 0x40,
+            modexp_input_ptr + 0x60,
+            modexp_input_ptr + 0x80,
+            modexp_input_ptr + 0xa0,
+            modexp_input_ptr + 0xc0,
+            modexp_input_ptr + 0xe0,
+            modexp_input_ptr + 0x100,
+            modexp_input_ptr + 0x20,
+            modexp_input_ptr + 0x40,
+            modexp_input_ptr + 0x60,
+            modexp_input_ptr + 0x80,
+            y_ptr + 0x20,
+            modexp_input_ptr + 0xa0,
+            modexp_input_ptr + 0xc0,
+            modexp_input_ptr + 0xe0,
+            modexp_input_ptr + 0x100,
+            y_sq_ptr + 0x20,
+            rhs_ptr + 0x20,
+            y_ptr + 0x20,
+            y_ptr + 0x20,
+        );
+        self.code.borrow_mut().runtime_append(code);
+        self.ec_point(Value::Memory(point_ptr))
     }
 
     /// Decode an elliptic curve point from limbs.
@@ -303,8 +518,7 @@ impl EvmLoader {
     }
 
     /// Allocates a new elliptic curve point and copies the given value into it.
-    pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
-        let ptr = self.allocate(BLS_G1_BYTES);
+    pub fn copy_ec_point(self: &Rc<Self>, value: &EcPoint, ptr: usize) {
         match value.value {
             Value::Memory(src_ptr) => {
                 let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
@@ -324,6 +538,12 @@ impl EvmLoader {
                 unreachable!()
             }
         }
+    }
+
+    /// Allocates a new elliptic curve point and copies the given value into it.
+    pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
+        let ptr = self.allocate(BLS_G1_BYTES);
+        self.copy_ec_point(value, ptr);
         self.ec_point(Value::Memory(ptr))
     }
 
