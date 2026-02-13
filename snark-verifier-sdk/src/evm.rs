@@ -203,6 +203,31 @@ where
     }
 }
 
+pub fn gen_evm_verifier_hybrid_artifacts<C, AS>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts
+where
+    C: CircuitExt<Fr>,
+    AS: EvmKzgAccumulationScheme,
+{
+    let loader = build_evm_loader::<C, AS>(params, vk, num_instance, EvmCodegenMode::Hybrid);
+    let compact = loader.compact_verifier_artifacts();
+    if let Some(path) = path {
+        path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
+        fs::write(path, &compact.runtime_solidity).unwrap();
+    }
+    EvmCompactVerifierArtifacts {
+        runtime_deployment_code: compile_solidity_via_ir(&compact.runtime_solidity),
+        runtime_solidity: compact.runtime_solidity,
+        page_runtime_codes: compact.page_runtime_codes,
+        page_deployment_codes: compact.page_deployment_codes,
+        manifest: compact.manifest,
+    }
+}
+
 pub fn gen_evm_verifier<C, AS>(
     params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
@@ -256,6 +281,24 @@ pub fn gen_evm_verifier_compact_artifacts_shplonk<C: CircuitExt<Fr>>(
     path: Option<&Path>,
 ) -> EvmCompactVerifierArtifacts {
     gen_evm_verifier_compact_artifacts::<C, SHPLONK>(params, vk, num_instance, path)
+}
+
+pub fn gen_evm_verifier_hybrid_artifacts_gwc<C: CircuitExt<Fr>>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts {
+    gen_evm_verifier_hybrid_artifacts::<C, GWC>(params, vk, num_instance, path)
+}
+
+pub fn gen_evm_verifier_hybrid_artifacts_shplonk<C: CircuitExt<Fr>>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts {
+    gen_evm_verifier_hybrid_artifacts::<C, SHPLONK>(params, vk, num_instance, path)
 }
 
 #[cfg(feature = "revm")]

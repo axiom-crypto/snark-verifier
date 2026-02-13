@@ -13,6 +13,8 @@ pub enum EvmCodegenMode {
     Unrolled,
     /// Emit compact bytecode program interpreted by a small runtime.
     Compact,
+    /// Emit compact program with hot scalar arithmetic opcodes for lower gas.
+    Hybrid,
 }
 
 #[derive(Clone, Debug)]

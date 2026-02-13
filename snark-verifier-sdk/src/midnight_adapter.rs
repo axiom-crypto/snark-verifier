@@ -395,6 +395,19 @@ impl MidnightProofBundle {
         Ok(loader.compact_verifier_artifacts())
     }
 
+    /// Generate hybrid verifier runtime + data-page artifacts.
+    ///
+    /// Hybrid mode keeps compact paging/interpreter structure while emitting
+    /// dedicated hot scalar memory-memory arithmetic opcodes.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_hybrid_artifacts(&self) -> Result<CompactVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader_with_mode(
+            EvmProofPointEncoding::Uncompressed,
+            EvmCodegenMode::Hybrid,
+        )?;
+        Ok(loader.compact_verifier_artifacts())
+    }
+
     /// Encode calldata expected by the generated Solidity verifier.
     ///
     /// The proof bytes must be produced with `MidnightEvmHash`.
@@ -441,6 +454,23 @@ impl MidnightProofBundle {
             calldata,
         )
         .map_err(|err| anyhow!("revm compact deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call hybrid verifier/runtime pages in local revm.
+    ///
+    /// Returns gas used by the verification call.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_hybrid(&self) -> Result<u64> {
+        let hybrid = self.generate_evm_verifier_hybrid_artifacts()?;
+        let runtime_deployment_code = compile_solidity_via_ir(&hybrid.runtime_solidity);
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_compact_and_call(
+            hybrid.page_deployment_codes,
+            runtime_deployment_code,
+            hybrid.manifest.program_words,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm hybrid deployment/call failed: {err}"))
     }
 
     /// Convert non-committed instances into halo2-axiom `Fr`.

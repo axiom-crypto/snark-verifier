@@ -19,6 +19,9 @@ const OP_STATICCALL: u8 = 11;
 const OP_ASSERT_ONE: u8 = 12;
 const OP_POINT_FROM_LIMBS: u8 = 13;
 const OP_MOD_FROM_MEM: u8 = 14;
+const OP_SCALAR_NEG_MEM: u8 = 15;
+const OP_SCALAR_ADD_MEM_MEM: u8 = 16;
+const OP_SCALAR_MUL_MEM_MEM: u8 = 17;
 
 const OPERAND_TAG_MEM: u8 = 0;
 const OPERAND_TAG_CONST: u8 = 1;
@@ -92,6 +95,20 @@ pub enum CompactInstruction {
     ModFromMem {
         dst: usize,
         src: usize,
+    },
+    ScalarNegMem {
+        dst: usize,
+        src: usize,
+    },
+    ScalarAddMemMem {
+        dst: usize,
+        lhs: usize,
+        rhs: usize,
+    },
+    ScalarMulMemMem {
+        dst: usize,
+        lhs: usize,
+        rhs: usize,
     },
 }
 
@@ -167,6 +184,7 @@ impl CompactProgram {
                 program_words: self.word_len(),
                 page_word_offsets,
                 page_word_counts,
+                max_memory_ptr: 0,
             },
             pages,
         }
@@ -180,6 +198,7 @@ pub struct CompactProgramManifest {
     pub program_words: usize,
     pub page_word_offsets: Vec<usize>,
     pub page_word_counts: Vec<usize>,
+    pub max_memory_ptr: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -276,6 +295,23 @@ fn encode_instruction(instruction: &CompactInstruction, out: &mut Vec<U256>) {
             out.push(header(OP_MOD_FROM_MEM, 3));
             out.push(U256::from(*dst));
             out.push(U256::from(*src));
+        }
+        CompactInstruction::ScalarNegMem { dst, src } => {
+            out.push(header(OP_SCALAR_NEG_MEM, 3));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*src));
+        }
+        CompactInstruction::ScalarAddMemMem { dst, lhs, rhs } => {
+            out.push(header(OP_SCALAR_ADD_MEM_MEM, 4));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*lhs));
+            out.push(U256::from(*rhs));
+        }
+        CompactInstruction::ScalarMulMemMem { dst, lhs, rhs } => {
+            out.push(header(OP_SCALAR_MUL_MEM_MEM, 4));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*lhs));
+            out.push(U256::from(*rhs));
         }
     }
 }

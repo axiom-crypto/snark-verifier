@@ -481,6 +481,21 @@ fn main() {
         compact.page_runtime_codes.iter().map(|page| page.len()).collect::<Vec<_>>();
     let compact_total_deployed_code =
         compact_runtime_code.len() + compact_page_sizes.iter().sum::<usize>();
+    let hybrid = bundle
+        .generate_evm_verifier_hybrid_artifacts()
+        .expect("failed to generate hybrid verifier artifacts");
+    let hybrid_runtime_deployment =
+        snark_verifier_sdk::snark_verifier::loader::evm::compile_solidity_via_ir(
+            &hybrid.runtime_solidity,
+        );
+    let hybrid_runtime_code =
+        snark_verifier_sdk::snark_verifier::loader::evm::compile_solidity_runtime_via_ir(
+            &hybrid.runtime_solidity,
+        );
+    let hybrid_page_sizes =
+        hybrid.page_runtime_codes.iter().map(|page| page.len()).collect::<Vec<_>>();
+    let hybrid_total_deployed_code =
+        hybrid_runtime_code.len() + hybrid_page_sizes.iter().sum::<usize>();
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
 
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
@@ -491,6 +506,10 @@ fn main() {
     let compact_runtime_path = out_dir.join("midnight_ivc_compact_runtime.bytecode");
     let compact_pages_path = out_dir.join("midnight_ivc_compact_pages.bytecode");
     let compact_manifest_path = out_dir.join("midnight_ivc_compact_manifest.txt");
+    let hybrid_solidity_path = out_dir.join("MidnightIvcVerifierHybrid.sol");
+    let hybrid_runtime_path = out_dir.join("midnight_ivc_hybrid_runtime.bytecode");
+    let hybrid_pages_path = out_dir.join("midnight_ivc_hybrid_pages.bytecode");
+    let hybrid_manifest_path = out_dir.join("midnight_ivc_hybrid_manifest.txt");
 
     std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
     std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
@@ -522,6 +541,32 @@ fn main() {
     );
     std::fs::write(&compact_manifest_path, compact_manifest)
         .expect("failed to write compact manifest");
+    std::fs::write(&hybrid_solidity_path, &hybrid.runtime_solidity)
+        .expect("failed to write hybrid Solidity verifier");
+    std::fs::write(
+        &hybrid_runtime_path,
+        format!("0x{}", hex::encode(&hybrid_runtime_deployment)),
+    )
+    .expect("failed to write hybrid verifier runtime deployment bytecode");
+    let hybrid_pages_lines = hybrid
+        .page_deployment_codes
+        .iter()
+        .enumerate()
+        .map(|(idx, code)| format!("page[{idx}] = 0x{}", hex::encode(code)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&hybrid_pages_path, hybrid_pages_lines)
+        .expect("failed to write hybrid page deployment bytecodes");
+    let hybrid_manifest = format!(
+        "opcode_version: {}\npage_size_bytes: {}\nprogram_words: {}\npage_word_offsets: {:?}\npage_word_counts: {:?}\n",
+        hybrid.manifest.opcode_version,
+        hybrid.manifest.page_size_bytes,
+        hybrid.manifest.program_words,
+        hybrid.manifest.page_word_offsets,
+        hybrid.manifest.page_word_counts,
+    );
+    std::fs::write(&hybrid_manifest_path, hybrid_manifest)
+        .expect("failed to write hybrid manifest");
 
     println!("proof bytes: {}", proof.len());
     println!("unrolled deployment code bytes: {}", bytecode.len());
@@ -533,6 +578,13 @@ fn main() {
         "compact total deployed runtime code bytes (verifier + pages): {}",
         compact_total_deployed_code
     );
+    println!("hybrid runtime deployment code bytes: {}", hybrid_runtime_deployment.len());
+    println!("hybrid verifier runtime code bytes: {}", hybrid_runtime_code.len());
+    println!("hybrid page runtime sizes (bytes): {:?}", hybrid_page_sizes);
+    println!(
+        "hybrid total deployed runtime code bytes (verifier + pages): {}",
+        hybrid_total_deployed_code
+    );
     println!("calldata bytes: {}", calldata.len());
     println!("wrote {}", solidity_path.display());
     println!("wrote {}", bytecode_path.display());
@@ -541,6 +593,10 @@ fn main() {
     println!("wrote {}", compact_runtime_path.display());
     println!("wrote {}", compact_pages_path.display());
     println!("wrote {}", compact_manifest_path.display());
+    println!("wrote {}", hybrid_solidity_path.display());
+    println!("wrote {}", hybrid_runtime_path.display());
+    println!("wrote {}", hybrid_pages_path.display());
+    println!("wrote {}", hybrid_manifest_path.display());
 
     #[cfg(feature = "revm")]
     {
@@ -566,6 +622,17 @@ fn main() {
                     println!("revm compact gas (reverted): {gas}");
                 }
                 println!("revm compact verification failed: {err_message}");
+            }
+        }
+
+        match bundle.verify_with_generated_solidity_revm_hybrid() {
+            Ok(gas) => println!("revm hybrid gas: {gas}"),
+            Err(err) => {
+                let err_message = err.to_string();
+                if let Some(gas) = extract_revm_gas(&err_message) {
+                    println!("revm hybrid gas (reverted): {gas}");
+                }
+                println!("revm hybrid verification failed: {err_message}");
             }
         }
     }

@@ -178,7 +178,9 @@ impl EvmLoader {
                 self.code.borrow_mut().runtime_append(code);
                 self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
             }
-            EvmCodegenMode::Compact => self.compact_verifier_artifacts().runtime_solidity,
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
+                self.compact_verifier_artifacts().runtime_solidity
+            }
         }
     }
 
@@ -187,21 +189,27 @@ impl EvmLoader {
         self.codegen_mode
     }
 
+    fn is_compact_codegen(&self) -> bool {
+        matches!(self.codegen_mode, EvmCodegenMode::Compact | EvmCodegenMode::Hybrid)
+    }
+
+    fn is_hybrid_codegen(&self) -> bool {
+        self.codegen_mode == EvmCodegenMode::Hybrid
+    }
+
     /// Returns the compact encoded program, if compact mode is enabled.
     pub fn compact_program(&self) -> Option<CompactProgram> {
-        (self.codegen_mode == EvmCodegenMode::Compact)
-            .then(|| self.compact_program.borrow().encode())
+        self.is_compact_codegen().then(|| self.compact_program.borrow().encode())
     }
 
     /// Returns compact verifier runtime source plus data-page artifacts.
     pub fn compact_verifier_artifacts(&self) -> CompactVerifierArtifacts {
-        assert_eq!(
-            self.codegen_mode,
-            EvmCodegenMode::Compact,
-            "compact verifier artifacts are only available in compact mode"
+        assert!(
+            self.is_compact_codegen(),
+            "compact verifier artifacts are only available in compact/hybrid mode"
         );
         let program = self.compact_program.borrow().encode();
-        build_compact_verifier_artifacts(self.scalar_modulus, &program)
+        build_compact_verifier_artifacts(self.scalar_modulus, &program, self.ptr())
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.
@@ -238,7 +246,7 @@ impl EvmLoader {
                     .borrow_mut()
                     .runtime_append(format!("mstore({ptr:#x}, {})", hex_encode_u256(&value)));
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::MstoreConst { dst: ptr, value });
             }
         }
@@ -249,7 +257,7 @@ impl EvmLoader {
             EvmCodegenMode::Unrolled => {
                 self.code.borrow_mut().runtime_append(format!("mstore({dst:#x}, mload({src:#x}))"));
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::MstoreMem { dst, src });
             }
         }
@@ -260,7 +268,7 @@ impl EvmLoader {
             EvmCodegenMode::Unrolled => {
                 self.code.borrow_mut().runtime_append(format!("mstore8({dst:#x}, {value})"));
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::Mstore8 { dst, value });
             }
         }
@@ -273,7 +281,7 @@ impl EvmLoader {
                     .borrow_mut()
                     .runtime_append(format!("mstore({dst:#x}, mod(mload({src:#x}), f_q))"));
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::ModFromMem { dst, src });
             }
         }
@@ -301,15 +309,45 @@ impl EvmLoader {
                 }
             }
             Value::Negated(inner) => {
+                if self.is_hybrid_codegen() {
+                    if let Value::Memory(src) = inner.as_ref() {
+                        self.compact_emit(CompactInstruction::ScalarNegMem { dst, src: *src });
+                        return;
+                    }
+                }
                 let operand = self.compact_operand(inner);
                 self.compact_emit(CompactInstruction::ScalarNeg { dst, operand });
             }
             Value::Sum(lhs, rhs) => {
+                if self.is_hybrid_codegen() {
+                    if let (Value::Memory(lhs_ptr), Value::Memory(rhs_ptr)) =
+                        (lhs.as_ref(), rhs.as_ref())
+                    {
+                        self.compact_emit(CompactInstruction::ScalarAddMemMem {
+                            dst,
+                            lhs: *lhs_ptr,
+                            rhs: *rhs_ptr,
+                        });
+                        return;
+                    }
+                }
                 let lhs = self.compact_operand(lhs);
                 let rhs = self.compact_operand(rhs);
                 self.compact_emit(CompactInstruction::ScalarAdd { dst, lhs, rhs });
             }
             Value::Product(lhs, rhs) => {
+                if self.is_hybrid_codegen() {
+                    if let (Value::Memory(lhs_ptr), Value::Memory(rhs_ptr)) =
+                        (lhs.as_ref(), rhs.as_ref())
+                    {
+                        self.compact_emit(CompactInstruction::ScalarMulMemMem {
+                            dst,
+                            lhs: *lhs_ptr,
+                            rhs: *rhs_ptr,
+                        });
+                        return;
+                    }
+                }
                 let lhs = self.compact_operand(lhs);
                 let rhs = self.compact_operand(rhs);
                 self.compact_emit(CompactInstruction::ScalarMul { dst, lhs, rhs });
@@ -350,7 +388,7 @@ impl EvmLoader {
                 let code = format!("mstore({ptr:#x}, mod(calldataload({offset:#x}), f_q))");
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::CalldataScalar { dst: ptr, offset });
             }
         }
@@ -385,7 +423,7 @@ impl EvmLoader {
                 );
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::CalldataPointUncompressed {
                     dst: x_ptr,
                     offset,
@@ -403,7 +441,7 @@ impl EvmLoader {
     ///
     /// This decompresses into EIP-2537 uncompressed `(x, y)` form in memory.
     pub fn calldataload_ec_point_compressed(self: &Rc<Self>, offset: usize) -> EcPoint {
-        if self.codegen_mode == EvmCodegenMode::Compact {
+        if self.is_compact_codegen() {
             panic!("compact EVM codegen does not support compressed proof-point encoding yet");
         }
 
@@ -627,7 +665,7 @@ impl EvmLoader {
                 );
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 let x_limbs = x_limbs
                     .iter()
                     .map(|limb| self.compact_operand(&limb.value))
@@ -664,7 +702,7 @@ impl EvmLoader {
                         let v = self.push(&Scalar { loader: self.clone(), value });
                         self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {v})"));
                     }
-                    EvmCodegenMode::Compact => {
+                    EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                         self.compact_emit_scalar_value(ptr, &value);
                     }
                 }
@@ -689,7 +727,7 @@ impl EvmLoader {
                 let code = format!("mstore({hash_ptr:#x}, keccak256({ptr:#x}, {len}))");
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::Keccak { dst: hash_ptr, ptr, len });
             }
         }
@@ -703,7 +741,7 @@ impl EvmLoader {
                 let scalar = self.push(scalar);
                 self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {scalar})"));
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit_scalar_value(ptr, &scalar.value);
             }
         }
@@ -734,7 +772,7 @@ impl EvmLoader {
                     );
                     self.code.borrow_mut().runtime_append(code);
                 }
-                EvmCodegenMode::Compact => {
+                EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                     self.compact_emit(CompactInstruction::CopyPoint { dst: ptr, src: src_ptr });
                 }
             },
@@ -767,7 +805,7 @@ impl EvmLoader {
                 let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::StaticCall {
                     precompile: precompile as usize,
                     cd_ptr,
@@ -842,7 +880,7 @@ impl EvmLoader {
                 let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
                 self.code.borrow_mut().runtime_append(code);
             }
-            EvmCodegenMode::Compact => {
+            EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_emit(CompactInstruction::AssertOne { ptr: rd_ptr });
             }
         }
@@ -1154,7 +1192,7 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     }
 
     fn sum_with_coeff_and_const(&self, values: &[(F, &Scalar)], constant: F) -> Scalar {
-        if self.codegen_mode == EvmCodegenMode::Compact {
+        if self.is_compact_codegen() {
             let mut result = self.load_const(&constant);
             for (coeff, value) in values {
                 assert_ne!(*coeff, F::ZERO);
@@ -1217,7 +1255,7 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
         values: &[(F, &Scalar, &Scalar)],
         constant: F,
     ) -> Scalar {
-        if self.codegen_mode == EvmCodegenMode::Compact {
+        if self.is_compact_codegen() {
             let mut result = self.load_const(&constant);
             for (coeff, lhs, rhs) in values {
                 assert_ne!(*coeff, F::ZERO);
@@ -1303,7 +1341,7 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
         let values = values.into_iter().collect_vec();
         let loader = &values.first().unwrap().loader;
-        if loader.codegen_mode == EvmCodegenMode::Compact {
+        if loader.is_compact_codegen() {
             values.into_iter().for_each(|value| {
                 *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
             });
