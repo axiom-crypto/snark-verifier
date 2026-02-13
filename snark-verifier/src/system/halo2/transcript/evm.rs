@@ -29,7 +29,18 @@ pub struct EvmTranscript<C: CurveAffine, L: Loader<C>, S, B> {
     loader: L,
     stream: S,
     buf: B,
+    buf_is_placeholder: bool,
+    proof_point_encoding: EvmProofPointEncoding,
     _marker: PhantomData<C>,
+}
+
+/// Proof point encoding used by the EVM transcript parser.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EvmProofPointEncoding {
+    /// Legacy format: concatenate uncompressed x || y coordinates.
+    Uncompressed,
+    /// Compact format: one sign byte plus x coordinate (`[sign || x]`).
+    XSignCompressed,
 }
 
 impl<C> EvmTranscript<C, Rc<EvmLoader>, usize, MemoryChunk>
@@ -40,10 +51,25 @@ where
     /// Initialize [`EvmTranscript`] given [`Rc<EvmLoader>`] and pre-allocate an
     /// u256 for `transcript_initial_state`.
     pub fn new(loader: &Rc<EvmLoader>) -> Self {
+        Self::new_with_encoding(loader, EvmProofPointEncoding::Uncompressed)
+    }
+
+    /// Initialize [`EvmTranscript`] with a specific proof point encoding.
+    pub fn new_with_encoding(
+        loader: &Rc<EvmLoader>,
+        proof_point_encoding: EvmProofPointEncoding,
+    ) -> Self {
         let ptr = loader.allocate(0x20);
         let mut buf = MemoryChunk::new(ptr);
         buf.extend(0x20);
-        Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
+        Self {
+            loader: loader.clone(),
+            stream: 0,
+            buf,
+            buf_is_placeholder: true,
+            proof_point_encoding,
+            _marker: PhantomData,
+        }
     }
 
     /// Load `num_instance` instances from calldata to memory.
@@ -67,6 +93,7 @@ where
             let ptr = self.loader.allocate(0x20);
             self.buf.reset(ptr);
             self.buf.extend(0x20);
+            self.buf_is_placeholder = true;
         }
 
         instances
@@ -85,7 +112,9 @@ where
     /// Does not allow the input to be a one-byte sequence, because the Transcript trait only supports writing scalars and elliptic curve points.
     /// If the one-byte sequence `[0x01]` is a valid input to the transcript, the empty input `[]` will have the same transcript result as `[0x01]`.
     fn squeeze_challenge(&mut self) -> Scalar {
-        let len = if self.buf.len() == 0x20 {
+        let len = if self.buf_is_placeholder {
+            0
+        } else if self.buf.len() == 0x20 {
             assert_eq!(self.loader.ptr(), self.buf.end());
             let buf_end = self.buf.end();
             let code = format!("mstore8({buf_end}, 1)");
@@ -109,11 +138,33 @@ where
 
         self.buf.reset(dup_hash_ptr);
         self.buf.extend(0x20);
+        self.buf_is_placeholder = false;
 
         self.loader.scalar(Value::Memory(challenge_ptr))
     }
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
+        if self.buf_is_placeholder && self.buf.len() == 0x20 {
+            if let Value::Memory(ptr) = ec_point.value() {
+                if self.buf.end() == ptr {
+                    self.buf.reset(ptr);
+                    self.buf.extend(self.loader.evm_ec_point_bytes());
+                } else {
+                    let dst = self.loader.dup_ec_point(ec_point);
+                    if let Value::Memory(dst_ptr) = dst.value() {
+                        self.buf.reset(dst_ptr);
+                        self.buf.extend(self.loader.evm_ec_point_bytes());
+                    } else {
+                        unreachable!()
+                    }
+                }
+                self.buf_is_placeholder = false;
+                return Ok(());
+            } else {
+                unreachable!()
+            }
+        }
+
         if let Value::Memory(ptr) = ec_point.value() {
             if self.buf.end() == ptr {
                 self.buf.extend(self.loader.evm_ec_point_bytes());
@@ -129,23 +180,32 @@ where
         } else {
             unreachable!()
         }
+        self.buf_is_placeholder = false;
         Ok(())
     }
 
     fn common_scalar(&mut self, scalar: &Scalar) -> Result<(), Error> {
         match scalar.value() {
-            Value::Constant(_) if self.buf.len() == 0x20 => {
+            Value::Constant(_) if self.buf.len() == 0x20 && self.buf_is_placeholder => {
                 self.loader.copy_scalar(scalar, self.buf.ptr());
+                self.buf_is_placeholder = false;
             }
             Value::Constant(_) => {
                 let ptr = self.loader.allocate(0x20);
                 assert_eq!(self.buf.end(), ptr);
                 self.loader.copy_scalar(scalar, ptr);
                 self.buf.extend(0x20);
+                self.buf_is_placeholder = false;
             }
             Value::Memory(ptr) => {
-                if self.buf.end() == ptr {
+                if self.buf.len() == 0x20 && self.buf_is_placeholder {
+                    self.loader
+                        .code_mut()
+                        .runtime_append(format!("mstore({:#x}, mload({ptr:#x}))", self.buf.ptr()));
+                    self.buf_is_placeholder = false;
+                } else if self.buf.end() == ptr {
                     self.buf.extend(0x20);
+                    self.buf_is_placeholder = false;
                 } else {
                     let dst = self.loader.allocate(0x20);
                     assert_eq!(self.buf.end(), dst);
@@ -153,6 +213,7 @@ where
                         .code_mut()
                         .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
                     self.buf.extend(0x20);
+                    self.buf_is_placeholder = false;
                 }
             }
             _ => unreachable!(),
@@ -174,8 +235,18 @@ where
     }
 
     fn read_ec_point(&mut self) -> Result<EcPoint, Error> {
-        let ec_point = self.loader.calldataload_ec_point(self.stream);
-        self.stream += self.loader.proof_ec_point_bytes();
+        let ec_point = match self.proof_point_encoding {
+            EvmProofPointEncoding::Uncompressed => {
+                let ec_point = self.loader.calldataload_ec_point(self.stream);
+                self.stream += self.loader.proof_ec_point_bytes();
+                ec_point
+            }
+            EvmProofPointEncoding::XSignCompressed => {
+                let ec_point = self.loader.calldataload_ec_point_compressed(self.stream);
+                self.stream += self.loader.proof_ec_point_compressed_bytes();
+                ec_point
+            }
+        };
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)
     }
@@ -188,7 +259,19 @@ where
     /// Initialize [`EvmTranscript`] given readable or writeable stream for
     /// verifying or proving with [`NativeLoader`].
     pub fn new(stream: S) -> Self {
-        Self { loader: NativeLoader, stream, buf: Vec::new(), _marker: PhantomData }
+        Self::new_with_encoding(stream, EvmProofPointEncoding::Uncompressed)
+    }
+
+    /// Initialize [`EvmTranscript`] with a specific proof point encoding.
+    pub fn new_with_encoding(stream: S, proof_point_encoding: EvmProofPointEncoding) -> Self {
+        Self {
+            loader: NativeLoader,
+            stream,
+            buf: Vec::new(),
+            buf_is_placeholder: false,
+            proof_point_encoding,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -267,35 +350,46 @@ where
     }
 
     fn read_ec_point(&mut self) -> Result<C, Error> {
-        let [mut x, mut y] = [<C::Base as PrimeField>::Repr::default(); 2];
-        for repr in [&mut x, &mut y] {
-            self.stream
-                .read_exact(repr.as_mut())
-                .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-            repr.as_mut().reverse();
-        }
-        let x = Option::from(<C::Base as PrimeField>::from_repr(x)).ok_or_else(|| {
-            Error::Transcript(
-                io::ErrorKind::Other,
-                "Invalid x-coordinate encoding in proof".to_string(),
-            )
-        })?;
-        let y = Option::from(<C::Base as PrimeField>::from_repr(y)).ok_or_else(|| {
-            Error::Transcript(
-                io::ErrorKind::Other,
-                "Invalid y-coordinate encoding in proof".to_string(),
-            )
-        })?;
-        // EVM precompiles represent point-at-infinity as (0, 0).
-        let ec_point = if x == C::Base::ZERO && y == C::Base::ZERO {
-            C::identity()
-        } else {
-            Option::from(C::from_xy(x, y)).ok_or_else(|| {
-                Error::Transcript(
-                    io::ErrorKind::Other,
-                    "Invalid elliptic curve point encoding in proof".to_string(),
-                )
-            })?
+        let ec_point = match self.proof_point_encoding {
+            EvmProofPointEncoding::Uncompressed => {
+                let [mut x, mut y] = [<C::Base as PrimeField>::Repr::default(); 2];
+                for repr in [&mut x, &mut y] {
+                    self.stream
+                        .read_exact(repr.as_mut())
+                        .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+                    repr.as_mut().reverse();
+                }
+                let x = Option::from(<C::Base as PrimeField>::from_repr(x)).ok_or_else(|| {
+                    Error::Transcript(
+                        io::ErrorKind::Other,
+                        "Invalid x-coordinate encoding in proof".to_string(),
+                    )
+                })?;
+                let y = Option::from(<C::Base as PrimeField>::from_repr(y)).ok_or_else(|| {
+                    Error::Transcript(
+                        io::ErrorKind::Other,
+                        "Invalid y-coordinate encoding in proof".to_string(),
+                    )
+                })?;
+                // EVM precompiles represent point-at-infinity as (0, 0).
+                if x == C::Base::ZERO && y == C::Base::ZERO {
+                    C::identity()
+                } else {
+                    Option::from(C::from_xy(x, y)).ok_or_else(|| {
+                        Error::Transcript(
+                            io::ErrorKind::Other,
+                            "Invalid elliptic curve point encoding in proof".to_string(),
+                        )
+                    })?
+                }
+            }
+            EvmProofPointEncoding::XSignCompressed => {
+                return Err(Error::Transcript(
+                    io::ErrorKind::Unsupported,
+                    "compressed EVM proof point decoding is unsupported in native EvmTranscript"
+                        .to_string(),
+                ))
+            }
         };
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)

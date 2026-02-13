@@ -222,75 +222,851 @@ mstore(0x1100, 1)
 mstore(0x1120, mload(0x1040))
 
         {
+            let flag := byte(0, calldataload(0x20))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1140, 0)
             mstore(0x1160, 0)
             mstore(0x1180, 0)
             mstore(0x11a0, 0)
-            calldatacopy(0x1150, 0x20, 0x30)
-            calldatacopy(0x1190, 0x50, 0x30)
+            calldatacopy(0x1150, 0x21, 0x30)
+
+            let x_hi := mload(0x1140)
+            let x_lo := mload(0x1160)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1180, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1180))
+                mstore(0x100, mload(0x11a0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x11a0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1180)), borrow)
+                    mstore(0x1180, neg_y_hi)
+                    mstore(0x11a0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x51))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x11c0, 0)
             mstore(0x11e0, 0)
             mstore(0x1200, 0)
             mstore(0x1220, 0)
-            calldatacopy(0x11d0, 0x80, 0x30)
-            calldatacopy(0x1210, 0xb0, 0x30)
+            calldatacopy(0x11d0, 0x52, 0x30)
+
+            let x_hi := mload(0x11c0)
+            let x_lo := mload(0x11e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1200, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1200))
+                mstore(0x100, mload(0x1220))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1220)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1200)), borrow)
+                    mstore(0x1200, neg_y_hi)
+                    mstore(0x1220, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x82))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1240, 0)
             mstore(0x1260, 0)
             mstore(0x1280, 0)
             mstore(0x12a0, 0)
-            calldatacopy(0x1250, 0xe0, 0x30)
-            calldatacopy(0x1290, 0x110, 0x30)
+            calldatacopy(0x1250, 0x83, 0x30)
+
+            let x_hi := mload(0x1240)
+            let x_lo := mload(0x1260)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1280, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1280))
+                mstore(0x100, mload(0x12a0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x12a0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1280)), borrow)
+                    mstore(0x1280, neg_y_hi)
+                    mstore(0x12a0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0xb3))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x12c0, 0)
             mstore(0x12e0, 0)
             mstore(0x1300, 0)
             mstore(0x1320, 0)
-            calldatacopy(0x12d0, 0x140, 0x30)
-            calldatacopy(0x1310, 0x170, 0x30)
+            calldatacopy(0x12d0, 0xb4, 0x30)
+
+            let x_hi := mload(0x12c0)
+            let x_lo := mload(0x12e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1300, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1300))
+                mstore(0x100, mload(0x1320))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1320)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1300)), borrow)
+                    mstore(0x1300, neg_y_hi)
+                    mstore(0x1320, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0xe4))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1340, 0)
             mstore(0x1360, 0)
             mstore(0x1380, 0)
             mstore(0x13a0, 0)
-            calldatacopy(0x1350, 0x1a0, 0x30)
-            calldatacopy(0x1390, 0x1d0, 0x30)
+            calldatacopy(0x1350, 0xe5, 0x30)
+
+            let x_hi := mload(0x1340)
+            let x_lo := mload(0x1360)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1380, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1380))
+                mstore(0x100, mload(0x13a0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x13a0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1380)), borrow)
+                    mstore(0x1380, neg_y_hi)
+                    mstore(0x13a0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x115))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x13c0, 0)
             mstore(0x13e0, 0)
             mstore(0x1400, 0)
             mstore(0x1420, 0)
-            calldatacopy(0x13d0, 0x200, 0x30)
-            calldatacopy(0x1410, 0x230, 0x30)
+            calldatacopy(0x13d0, 0x116, 0x30)
+
+            let x_hi := mload(0x13c0)
+            let x_lo := mload(0x13e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1400, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1400))
+                mstore(0x100, mload(0x1420))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1420)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1400)), borrow)
+                    mstore(0x1400, neg_y_hi)
+                    mstore(0x1420, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x146))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1440, 0)
             mstore(0x1460, 0)
             mstore(0x1480, 0)
             mstore(0x14a0, 0)
-            calldatacopy(0x1450, 0x260, 0x30)
-            calldatacopy(0x1490, 0x290, 0x30)
+            calldatacopy(0x1450, 0x147, 0x30)
+
+            let x_hi := mload(0x1440)
+            let x_lo := mload(0x1460)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1480, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1480))
+                mstore(0x100, mload(0x14a0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x14a0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1480)), borrow)
+                    mstore(0x1480, neg_y_hi)
+                    mstore(0x14a0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x177))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x14c0, 0)
             mstore(0x14e0, 0)
             mstore(0x1500, 0)
             mstore(0x1520, 0)
-            calldatacopy(0x14d0, 0x2c0, 0x30)
-            calldatacopy(0x1510, 0x2f0, 0x30)
+            calldatacopy(0x14d0, 0x178, 0x30)
+
+            let x_hi := mload(0x14c0)
+            let x_lo := mload(0x14e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1500, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1500))
+                mstore(0x100, mload(0x1520))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1520)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1500)), borrow)
+                    mstore(0x1500, neg_y_hi)
+                    mstore(0x1520, neg_y_lo)
+                }
+            }
         }
 mstore(0x1540, keccak256(0x1060, 1248))
 {
@@ -300,21 +1076,215 @@ mstore(0x1540, keccak256(0x1060, 1248))
         }
 
         {
+            let flag := byte(0, calldataload(0x1a8))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x15a0, 0)
             mstore(0x15c0, 0)
             mstore(0x15e0, 0)
             mstore(0x1600, 0)
-            calldatacopy(0x15b0, 0x320, 0x30)
-            calldatacopy(0x15f0, 0x350, 0x30)
+            calldatacopy(0x15b0, 0x1a9, 0x30)
+
+            let x_hi := mload(0x15a0)
+            let x_lo := mload(0x15c0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x15e0, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x15e0))
+                mstore(0x100, mload(0x1600))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1600)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x15e0)), borrow)
+                    mstore(0x15e0, neg_y_hi)
+                    mstore(0x1600, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x1d9))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1620, 0)
             mstore(0x1640, 0)
             mstore(0x1660, 0)
             mstore(0x1680, 0)
-            calldatacopy(0x1630, 0x380, 0x30)
-            calldatacopy(0x1670, 0x3b0, 0x30)
+            calldatacopy(0x1630, 0x1da, 0x30)
+
+            let x_hi := mload(0x1620)
+            let x_lo := mload(0x1640)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1660, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1660))
+                mstore(0x100, mload(0x1680))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1680)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1660)), borrow)
+                    mstore(0x1660, neg_y_hi)
+                    mstore(0x1680, neg_y_lo)
+                }
+            }
         }
 mstore(0x16a0, keccak256(0x1580, 288))
 {
@@ -331,39 +1301,427 @@ mstore(0x1700, keccak256(0x16e0, 33))
         }
 
         {
+            let flag := byte(0, calldataload(0x20a))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1760, 0)
             mstore(0x1780, 0)
             mstore(0x17a0, 0)
             mstore(0x17c0, 0)
-            calldatacopy(0x1770, 0x3e0, 0x30)
-            calldatacopy(0x17b0, 0x410, 0x30)
+            calldatacopy(0x1770, 0x20b, 0x30)
+
+            let x_hi := mload(0x1760)
+            let x_lo := mload(0x1780)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x17a0, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x17a0))
+                mstore(0x100, mload(0x17c0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x17c0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x17a0)), borrow)
+                    mstore(0x17a0, neg_y_hi)
+                    mstore(0x17c0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x23b))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x17e0, 0)
             mstore(0x1800, 0)
             mstore(0x1820, 0)
             mstore(0x1840, 0)
-            calldatacopy(0x17f0, 0x440, 0x30)
-            calldatacopy(0x1830, 0x470, 0x30)
+            calldatacopy(0x17f0, 0x23c, 0x30)
+
+            let x_hi := mload(0x17e0)
+            let x_lo := mload(0x1800)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1820, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1820))
+                mstore(0x100, mload(0x1840))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1840)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1820)), borrow)
+                    mstore(0x1820, neg_y_hi)
+                    mstore(0x1840, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x26c))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1860, 0)
             mstore(0x1880, 0)
             mstore(0x18a0, 0)
             mstore(0x18c0, 0)
-            calldatacopy(0x1870, 0x4a0, 0x30)
-            calldatacopy(0x18b0, 0x4d0, 0x30)
+            calldatacopy(0x1870, 0x26d, 0x30)
+
+            let x_hi := mload(0x1860)
+            let x_lo := mload(0x1880)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x18a0, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x18a0))
+                mstore(0x100, mload(0x18c0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x18c0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x18a0)), borrow)
+                    mstore(0x18a0, neg_y_hi)
+                    mstore(0x18c0, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x29d))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x18e0, 0)
             mstore(0x1900, 0)
             mstore(0x1920, 0)
             mstore(0x1940, 0)
-            calldatacopy(0x18f0, 0x500, 0x30)
-            calldatacopy(0x1930, 0x530, 0x30)
+            calldatacopy(0x18f0, 0x29e, 0x30)
+
+            let x_hi := mload(0x18e0)
+            let x_lo := mload(0x1900)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1920, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1920))
+                mstore(0x100, mload(0x1940))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1940)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1920)), borrow)
+                    mstore(0x1920, neg_y_hi)
+                    mstore(0x1940, neg_y_lo)
+                }
+            }
         }
 mstore(0x1960, keccak256(0x1740, 544))
 {
@@ -373,21 +1731,215 @@ mstore(0x1960, keccak256(0x1740, 544))
         }
 
         {
+            let flag := byte(0, calldataload(0x2ce))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x19c0, 0)
             mstore(0x19e0, 0)
             mstore(0x1a00, 0)
             mstore(0x1a20, 0)
-            calldatacopy(0x19d0, 0x560, 0x30)
-            calldatacopy(0x1a10, 0x590, 0x30)
+            calldatacopy(0x19d0, 0x2cf, 0x30)
+
+            let x_hi := mload(0x19c0)
+            let x_lo := mload(0x19e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a00, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1a00))
+                mstore(0x100, mload(0x1a20))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1a20)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1a00)), borrow)
+                    mstore(0x1a00, neg_y_hi)
+                    mstore(0x1a20, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x2ff))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1a40, 0)
             mstore(0x1a60, 0)
             mstore(0x1a80, 0)
             mstore(0x1aa0, 0)
-            calldatacopy(0x1a50, 0x5c0, 0x30)
-            calldatacopy(0x1a90, 0x5f0, 0x30)
+            calldatacopy(0x1a50, 0x300, 0x30)
+
+            let x_hi := mload(0x1a40)
+            let x_lo := mload(0x1a60)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a80, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1a80))
+                mstore(0x100, mload(0x1aa0))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1aa0)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1a80)), borrow)
+                    mstore(0x1a80, neg_y_hi)
+                    mstore(0x1aa0, neg_y_lo)
+                }
+            }
         }
 mstore(0x1ac0, keccak256(0x19a0, 288))
 {
@@ -397,39 +1949,427 @@ mstore(0x1ac0, keccak256(0x19a0, 288))
         }
 
         {
+            let flag := byte(0, calldataload(0x330))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1b20, 0)
             mstore(0x1b40, 0)
             mstore(0x1b60, 0)
             mstore(0x1b80, 0)
-            calldatacopy(0x1b30, 0x620, 0x30)
-            calldatacopy(0x1b70, 0x650, 0x30)
+            calldatacopy(0x1b30, 0x331, 0x30)
+
+            let x_hi := mload(0x1b20)
+            let x_lo := mload(0x1b40)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1b60, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1b60))
+                mstore(0x100, mload(0x1b80))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1b80)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1b60)), borrow)
+                    mstore(0x1b60, neg_y_hi)
+                    mstore(0x1b80, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x361))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1ba0, 0)
             mstore(0x1bc0, 0)
             mstore(0x1be0, 0)
             mstore(0x1c00, 0)
-            calldatacopy(0x1bb0, 0x680, 0x30)
-            calldatacopy(0x1bf0, 0x6b0, 0x30)
+            calldatacopy(0x1bb0, 0x362, 0x30)
+
+            let x_hi := mload(0x1ba0)
+            let x_lo := mload(0x1bc0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1be0, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1be0))
+                mstore(0x100, mload(0x1c00))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1c00)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1be0)), borrow)
+                    mstore(0x1be0, neg_y_hi)
+                    mstore(0x1c00, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x392))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1c20, 0)
             mstore(0x1c40, 0)
             mstore(0x1c60, 0)
             mstore(0x1c80, 0)
-            calldatacopy(0x1c30, 0x6e0, 0x30)
-            calldatacopy(0x1c70, 0x710, 0x30)
+            calldatacopy(0x1c30, 0x393, 0x30)
+
+            let x_hi := mload(0x1c20)
+            let x_lo := mload(0x1c40)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1c60, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1c60))
+                mstore(0x100, mload(0x1c80))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1c80)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1c60)), borrow)
+                    mstore(0x1c60, neg_y_hi)
+                    mstore(0x1c80, neg_y_lo)
+                }
+            }
         }
 
         {
+            let flag := byte(0, calldataload(0x3c3))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x1ca0, 0)
             mstore(0x1cc0, 0)
             mstore(0x1ce0, 0)
             mstore(0x1d00, 0)
-            calldatacopy(0x1cb0, 0x740, 0x30)
-            calldatacopy(0x1cf0, 0x770, 0x30)
+            calldatacopy(0x1cb0, 0x3c4, 0x30)
+
+            let x_hi := mload(0x1ca0)
+            let x_lo := mload(0x1cc0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1ce0, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x1ce0))
+                mstore(0x100, mload(0x1d00))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x1d00)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x1ce0)), borrow)
+                    mstore(0x1ce0, neg_y_hi)
+                    mstore(0x1d00, neg_y_lo)
+                }
+            }
         }
 mstore(0x1d20, keccak256(0x1b00, 544))
 {
@@ -437,60 +2377,60 @@ mstore(0x1d20, keccak256(0x1b00, 544))
             mstore(0x1d40, mod(hash, f_q))
             mstore(0x1d60, hash)
         }
-mstore(0x1d80, mod(calldataload(0x7a0), f_q))
-mstore(0x1da0, mod(calldataload(0x7c0), f_q))
-mstore(0x1dc0, mod(calldataload(0x7e0), f_q))
-mstore(0x1de0, mod(calldataload(0x800), f_q))
-mstore(0x1e00, mod(calldataload(0x820), f_q))
-mstore(0x1e20, mod(calldataload(0x840), f_q))
-mstore(0x1e40, mod(calldataload(0x860), f_q))
-mstore(0x1e60, mod(calldataload(0x880), f_q))
-mstore(0x1e80, mod(calldataload(0x8a0), f_q))
-mstore(0x1ea0, mod(calldataload(0x8c0), f_q))
-mstore(0x1ec0, mod(calldataload(0x8e0), f_q))
-mstore(0x1ee0, mod(calldataload(0x900), f_q))
-mstore(0x1f00, mod(calldataload(0x920), f_q))
-mstore(0x1f20, mod(calldataload(0x940), f_q))
-mstore(0x1f40, mod(calldataload(0x960), f_q))
-mstore(0x1f60, mod(calldataload(0x980), f_q))
-mstore(0x1f80, mod(calldataload(0x9a0), f_q))
-mstore(0x1fa0, mod(calldataload(0x9c0), f_q))
-mstore(0x1fc0, mod(calldataload(0x9e0), f_q))
-mstore(0x1fe0, mod(calldataload(0xa00), f_q))
-mstore(0x2000, mod(calldataload(0xa20), f_q))
-mstore(0x2020, mod(calldataload(0xa40), f_q))
-mstore(0x2040, mod(calldataload(0xa60), f_q))
-mstore(0x2060, mod(calldataload(0xa80), f_q))
-mstore(0x2080, mod(calldataload(0xaa0), f_q))
-mstore(0x20a0, mod(calldataload(0xac0), f_q))
-mstore(0x20c0, mod(calldataload(0xae0), f_q))
-mstore(0x20e0, mod(calldataload(0xb00), f_q))
-mstore(0x2100, mod(calldataload(0xb20), f_q))
-mstore(0x2120, mod(calldataload(0xb40), f_q))
-mstore(0x2140, mod(calldataload(0xb60), f_q))
-mstore(0x2160, mod(calldataload(0xb80), f_q))
-mstore(0x2180, mod(calldataload(0xba0), f_q))
-mstore(0x21a0, mod(calldataload(0xbc0), f_q))
-mstore(0x21c0, mod(calldataload(0xbe0), f_q))
-mstore(0x21e0, mod(calldataload(0xc00), f_q))
-mstore(0x2200, mod(calldataload(0xc20), f_q))
-mstore(0x2220, mod(calldataload(0xc40), f_q))
-mstore(0x2240, mod(calldataload(0xc60), f_q))
-mstore(0x2260, mod(calldataload(0xc80), f_q))
-mstore(0x2280, mod(calldataload(0xca0), f_q))
-mstore(0x22a0, mod(calldataload(0xcc0), f_q))
-mstore(0x22c0, mod(calldataload(0xce0), f_q))
-mstore(0x22e0, mod(calldataload(0xd00), f_q))
-mstore(0x2300, mod(calldataload(0xd20), f_q))
-mstore(0x2320, mod(calldataload(0xd40), f_q))
-mstore(0x2340, mod(calldataload(0xd60), f_q))
-mstore(0x2360, mod(calldataload(0xd80), f_q))
-mstore(0x2380, mod(calldataload(0xda0), f_q))
-mstore(0x23a0, mod(calldataload(0xdc0), f_q))
-mstore(0x23c0, mod(calldataload(0xde0), f_q))
-mstore(0x23e0, mod(calldataload(0xe00), f_q))
-mstore(0x2400, mod(calldataload(0xe20), f_q))
-mstore(0x2420, mod(calldataload(0xe40), f_q))
+mstore(0x1d80, mod(calldataload(0x3f4), f_q))
+mstore(0x1da0, mod(calldataload(0x414), f_q))
+mstore(0x1dc0, mod(calldataload(0x434), f_q))
+mstore(0x1de0, mod(calldataload(0x454), f_q))
+mstore(0x1e00, mod(calldataload(0x474), f_q))
+mstore(0x1e20, mod(calldataload(0x494), f_q))
+mstore(0x1e40, mod(calldataload(0x4b4), f_q))
+mstore(0x1e60, mod(calldataload(0x4d4), f_q))
+mstore(0x1e80, mod(calldataload(0x4f4), f_q))
+mstore(0x1ea0, mod(calldataload(0x514), f_q))
+mstore(0x1ec0, mod(calldataload(0x534), f_q))
+mstore(0x1ee0, mod(calldataload(0x554), f_q))
+mstore(0x1f00, mod(calldataload(0x574), f_q))
+mstore(0x1f20, mod(calldataload(0x594), f_q))
+mstore(0x1f40, mod(calldataload(0x5b4), f_q))
+mstore(0x1f60, mod(calldataload(0x5d4), f_q))
+mstore(0x1f80, mod(calldataload(0x5f4), f_q))
+mstore(0x1fa0, mod(calldataload(0x614), f_q))
+mstore(0x1fc0, mod(calldataload(0x634), f_q))
+mstore(0x1fe0, mod(calldataload(0x654), f_q))
+mstore(0x2000, mod(calldataload(0x674), f_q))
+mstore(0x2020, mod(calldataload(0x694), f_q))
+mstore(0x2040, mod(calldataload(0x6b4), f_q))
+mstore(0x2060, mod(calldataload(0x6d4), f_q))
+mstore(0x2080, mod(calldataload(0x6f4), f_q))
+mstore(0x20a0, mod(calldataload(0x714), f_q))
+mstore(0x20c0, mod(calldataload(0x734), f_q))
+mstore(0x20e0, mod(calldataload(0x754), f_q))
+mstore(0x2100, mod(calldataload(0x774), f_q))
+mstore(0x2120, mod(calldataload(0x794), f_q))
+mstore(0x2140, mod(calldataload(0x7b4), f_q))
+mstore(0x2160, mod(calldataload(0x7d4), f_q))
+mstore(0x2180, mod(calldataload(0x7f4), f_q))
+mstore(0x21a0, mod(calldataload(0x814), f_q))
+mstore(0x21c0, mod(calldataload(0x834), f_q))
+mstore(0x21e0, mod(calldataload(0x854), f_q))
+mstore(0x2200, mod(calldataload(0x874), f_q))
+mstore(0x2220, mod(calldataload(0x894), f_q))
+mstore(0x2240, mod(calldataload(0x8b4), f_q))
+mstore(0x2260, mod(calldataload(0x8d4), f_q))
+mstore(0x2280, mod(calldataload(0x8f4), f_q))
+mstore(0x22a0, mod(calldataload(0x914), f_q))
+mstore(0x22c0, mod(calldataload(0x934), f_q))
+mstore(0x22e0, mod(calldataload(0x954), f_q))
+mstore(0x2300, mod(calldataload(0x974), f_q))
+mstore(0x2320, mod(calldataload(0x994), f_q))
+mstore(0x2340, mod(calldataload(0x9b4), f_q))
+mstore(0x2360, mod(calldataload(0x9d4), f_q))
+mstore(0x2380, mod(calldataload(0x9f4), f_q))
+mstore(0x23a0, mod(calldataload(0xa14), f_q))
+mstore(0x23c0, mod(calldataload(0xa34), f_q))
+mstore(0x23e0, mod(calldataload(0xa54), f_q))
+mstore(0x2400, mod(calldataload(0xa74), f_q))
+mstore(0x2420, mod(calldataload(0xa94), f_q))
 mstore(0x2440, keccak256(0x1d60, 1760))
 {
             let hash := mload(0x2440)
@@ -506,12 +2446,109 @@ mstore(0x24a0, keccak256(0x2480, 33))
         }
 
         {
+            let flag := byte(0, calldataload(0xab4))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x2500, 0)
             mstore(0x2520, 0)
             mstore(0x2540, 0)
             mstore(0x2560, 0)
-            calldatacopy(0x2510, 0xe60, 0x30)
-            calldatacopy(0x2550, 0xe90, 0x30)
+            calldatacopy(0x2510, 0xab5, 0x30)
+
+            let x_hi := mload(0x2500)
+            let x_lo := mload(0x2520)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x2540, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x2540))
+                mstore(0x100, mload(0x2560))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x2560)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x2540)), borrow)
+                    mstore(0x2540, neg_y_hi)
+                    mstore(0x2560, neg_y_lo)
+                }
+            }
         }
 mstore(0x2580, keccak256(0x24e0, 160))
 {
@@ -519,10 +2556,10 @@ mstore(0x2580, keccak256(0x24e0, 160))
             mstore(0x25a0, mod(hash, f_q))
             mstore(0x25c0, hash)
         }
-mstore(0x25e0, mod(calldataload(0xec0), f_q))
-mstore(0x2600, mod(calldataload(0xee0), f_q))
-mstore(0x2620, mod(calldataload(0xf00), f_q))
-mstore(0x2640, mod(calldataload(0xf20), f_q))
+mstore(0x25e0, mod(calldataload(0xae5), f_q))
+mstore(0x2600, mod(calldataload(0xb05), f_q))
+mstore(0x2620, mod(calldataload(0xb25), f_q))
+mstore(0x2640, mod(calldataload(0xb45), f_q))
 mstore(0x2660, keccak256(0x25c0, 160))
 {
             let hash := mload(0x2660)
@@ -531,12 +2568,109 @@ mstore(0x2660, keccak256(0x25c0, 160))
         }
 
         {
+            let flag := byte(0, calldataload(0xb65))
+            let y_odd := and(flag, 1)
+            let is_inf := and(shr(1, flag), 1)
+            // Reject unsupported flag bits.
+            success := and(iszero(and(flag, 0xfc)), success)
+
+            // Zero-initialize x/y limbs then copy compact x.
             mstore(0x26c0, 0)
             mstore(0x26e0, 0)
             mstore(0x2700, 0)
             mstore(0x2720, 0)
-            calldatacopy(0x26d0, 0xf40, 0x30)
-            calldatacopy(0x2710, 0xf70, 0x30)
+            calldatacopy(0x26d0, 0xb66, 0x30)
+
+            let x_hi := mload(0x26c0)
+            let x_lo := mload(0x26e0)
+
+            if is_inf {
+                // Infinity must carry zero x and odd-flag unset.
+                success := and(eq(y_odd, 0), success)
+                success := and(eq(x_hi, 0), success)
+                success := and(eq(x_lo, 0), success)
+            }
+
+            if iszero(is_inf) {
+                // Enforce x < p.
+                success := and(
+                    or(lt(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(x_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), lt(x_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab))),
+                    success
+                )
+
+                // rhs <- x^3 mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, x_hi)
+                mstore(0x100, x_lo)
+                mstore(0x120, 0)
+                mstore(0x140, 3)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1a0, 0x40), 1),
+                    success
+                )
+
+                // rhs <- (x^3 + 4) mod p.
+                let rhs_hi := mload(0x1a0)
+                let rhs_lo0 := mload(0x1c0)
+                let rhs_lo := add(rhs_lo0, 4)
+                let carry := lt(rhs_lo, rhs_lo0)
+                rhs_hi := add(rhs_hi, carry)
+                if or(gt(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), and(eq(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7), iszero(lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)))) {
+                    rhs_hi := sub(rhs_hi, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                    let borrow := lt(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_lo := sub(rhs_lo, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                    rhs_hi := sub(rhs_hi, borrow)
+                }
+                mstore(0x1a0, rhs_hi)
+                mstore(0x1c0, rhs_lo)
+
+                // y <- rhs^((p+1)/4) mod p.
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, rhs_hi)
+                mstore(0x100, rhs_lo)
+                mstore(0x120, 0x000000000000000000000000000000000680447a8e5ff9a692c6e9ed90d2eb35)
+                mstore(0x140, 0xd91dd2e13ce144afd9cc34a83dac3d8907aaffffac54ffffee7fbfffffffeaab)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x2700, 0x40), 1),
+                    success
+                )
+
+                // Validate square root: y^2 == rhs (mod p).
+                mstore(0x80, 0x40)
+                mstore(0xa0, 0x40)
+                mstore(0xc0, 0x40)
+                mstore(0xe0, mload(0x2700))
+                mstore(0x100, mload(0x2720))
+                mstore(0x120, 0)
+                mstore(0x140, 2)
+                mstore(0x160, 0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7)
+                mstore(0x180, 0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab)
+                success := and(
+                    eq(staticcall(gas(), 0x5, 0x80, 0x120, 0x1e0, 0x40), 1),
+                    success
+                )
+                success := and(eq(mload(0x1e0), mload(0x1a0)), success)
+                success := and(eq(mload(0x200), mload(0x1c0)), success)
+
+                // Select y root by oddness bit.
+                let y_lo := mload(0x2720)
+                let is_odd_y := and(y_lo, 1)
+                if xor(is_odd_y, y_odd) {
+                    let neg_y_lo := sub(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let borrow := lt(0x64774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, y_lo)
+                    let neg_y_hi := sub(sub(0x000000000000000000000000000000001a0111ea397fe69a4b1ba7b6434bacd7, mload(0x2700)), borrow)
+                    mstore(0x2700, neg_y_hi)
+                    mstore(0x2720, neg_y_lo)
+                }
+            }
         }
 
         {

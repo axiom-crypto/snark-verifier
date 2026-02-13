@@ -16,7 +16,8 @@ use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use snark_verifier_sdk::{
-    midnight_adapter::MidnightProofBundle, midnight_evm_transcript::MidnightEvmHash,
+    midnight_adapter::MidnightProofBundle,
+    midnight_evm_transcript::{MidnightEvmHash, MidnightEvmHashCompressed},
 };
 use std::path::PathBuf;
 
@@ -125,13 +126,88 @@ fn main() {
     println!("wrote {}", bytecode_path.display());
     println!("wrote {}", calldata_path.display());
 
+    // Compressed-proof variant (`[sign || x]` per G1 point).
+    let proof_compressed = midnight_zk_stdlib::prove::<PoseidonExample, MidnightEvmHashCompressed>(
+        &srs, &pk, &relation, &instance, witness, OsRng,
+    )
+    .expect("compressed EVM-transcript proof generation should not fail");
+
+    midnight_zk_stdlib::verify::<PoseidonExample, MidnightEvmHashCompressed>(
+        &srs.verifier_params(),
+        &vk,
+        &instance,
+        None,
+        &proof_compressed,
+    )
+    .expect("compressed EVM-transcript native verification should succeed");
+
+    let bundle_compressed = MidnightProofBundle::new_unchecked(
+        srs.verifier_params(),
+        vk.vk().clone(),
+        proof_compressed.clone(),
+        vec![vec![instance]],
+    )
+    .expect("compressed bundle creation should succeed");
+
+    let solidity_compressed = bundle_compressed
+        .generate_evm_verifier_solidity_compressed_proof()
+        .expect("failed to generate compressed Solidity verifier source");
+    let bytecode_compressed = bundle_compressed
+        .generate_evm_verifier_bytecode_compressed_proof()
+        .expect("failed to compile compressed Solidity verifier");
+    let calldata_compressed = bundle_compressed
+        .encode_evm_calldata()
+        .expect("failed to encode compressed EVM calldata");
+
+    let solidity_compressed_path = out_dir.join("MidnightPoseidonVerifierCompressed.sol");
+    let bytecode_compressed_path = out_dir.join("midnight_poseidon_compressed.bytecode");
+    let calldata_compressed_path = out_dir.join("midnight_poseidon_compressed.calldata");
+
+    std::fs::write(&solidity_compressed_path, &solidity_compressed)
+        .expect("failed to write compressed Solidity verifier");
+    std::fs::write(
+        &bytecode_compressed_path,
+        format!("0x{}", hex::encode(&bytecode_compressed)),
+    )
+    .expect("failed to write compressed verifier bytecode");
+    std::fs::write(&calldata_compressed_path, hex::encode(&calldata_compressed))
+        .expect("failed to write compressed calldata");
+
+    println!("compressed proof bytes: {}", proof_compressed.len());
+    println!("compressed deployment code bytes: {}", bytecode_compressed.len());
+    println!("compressed calldata bytes: {}", calldata_compressed.len());
+    println!(
+        "proof byte delta (compressed - uncompressed): {}",
+        proof_compressed.len() as isize - proof.len() as isize
+    );
+    println!(
+        "calldata byte delta (compressed - uncompressed): {}",
+        calldata_compressed.len() as isize - calldata.len() as isize
+    );
+    println!("wrote {}", solidity_compressed_path.display());
+    println!("wrote {}", bytecode_compressed_path.display());
+    println!("wrote {}", calldata_compressed_path.display());
+
     #[cfg(feature = "revm")]
     {
         if std::env::var("RUN_REVM").ok().as_deref() == Some("1") {
             let gas = bundle
                 .verify_with_generated_solidity_revm()
-                .expect("revm verification should succeed");
-            println!("revm gas: {gas}");
+                .expect("revm verification (uncompressed) should succeed");
+            println!("revm gas (uncompressed): {gas}");
+
+            match bundle_compressed.verify_with_generated_solidity_revm_compressed_proof() {
+                Ok(gas_compressed) => {
+                    println!("revm gas (compressed): {gas_compressed}");
+                    println!(
+                        "revm gas delta (compressed - uncompressed): {}",
+                        gas_compressed as i64 - gas as i64
+                    );
+                }
+                Err(err) => {
+                    println!("revm compressed verification failed: {err}");
+                }
+            }
         } else {
             println!("revm verification skipped (set RUN_REVM=1 to run local revm simulation)");
         }
