@@ -56,7 +56,7 @@ type E = <S as SelfEmulation>::Engine;
 type CBase = <C as CircuitCurve>::Base;
 type NG = NativeGadget<F, P2RDecompositionChip<F>, NativeChip<F>>;
 
-const K: u32 = 19;
+const K: u32 = 20;
 
 #[cfg(feature = "revm")]
 fn extract_revm_gas(message: &str) -> Option<u64> {
