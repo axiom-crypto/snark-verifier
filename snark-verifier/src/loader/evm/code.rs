@@ -6,6 +6,15 @@ pub enum Precompiled {
     Bls12_381Pairing = 0x0f,
 }
 
+/// EVM verifier codegen backend selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EvmCodegenMode {
+    /// Emit direct unrolled assembly statements.
+    Unrolled,
+    /// Emit compact bytecode program interpreted by a small runtime.
+    Compact,
+}
+
 #[derive(Clone, Debug)]
 pub struct SolidityAssemblyCode {
     // runtime code area

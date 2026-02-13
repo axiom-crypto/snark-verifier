@@ -59,7 +59,10 @@ use snark_verifier::{
 #[cfg(feature = "loader_evm")]
 use snark_verifier::{
     loader::{
-        evm::{compile_solidity, encode_calldata, EvmLoader},
+        evm::{
+            compile_solidity, compile_solidity_via_ir, encode_calldata, CompactVerifierArtifacts,
+            EvmCodegenMode, EvmLoader,
+        },
         EcPointLoader,
     },
     system::halo2::transcript::evm::{EvmProofPointEncoding, EvmTranscript},
@@ -333,26 +336,20 @@ impl MidnightProofBundle {
 
         let mut transcript =
             EvmTranscript::<HaloG1Affine, NativeLoader, _, _>::new(self.proof.as_slice());
-        let proof = PlonkProof::<HaloG1Affine, NativeLoader, HaloAs>::read_with_committed_instances::<
-            _,
-            LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
-        >(
-            &svk,
-            &protocol,
-            &instances,
-            Some(&committed_instances),
-            &mut transcript,
-        )
-        .map_err(|e| {
-            anyhow!(
+        let proof =
+            PlonkProof::<HaloG1Affine, NativeLoader, HaloAs>::read_with_committed_instances::<
+                _,
+                LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
+            >(&svk, &protocol, &instances, Some(&committed_instances), &mut transcript)
+            .map_err(|e| {
+                anyhow!(
                 "failed to parse midnight EVM-transcript proof into snark-verifier proof: {e:?}"
             )
-        })?;
+            })?;
 
-        <crate::PlonkSuccinctVerifier<HaloAs> as SnarkVerifier<
-            HaloG1Affine,
-            NativeLoader,
-        >>::verify(&svk, &protocol, &instances, &proof)
+        <crate::PlonkSuccinctVerifier<HaloAs> as SnarkVerifier<HaloG1Affine, NativeLoader>>::verify(
+            &svk, &protocol, &instances, &proof,
+        )
         .map_err(|e| anyhow!("snark-verifier EVM-transcript succinct verification failed: {e:?}"))
     }
 
@@ -370,8 +367,7 @@ impl MidnightProofBundle {
     /// encoded as `[sign_byte || x_coordinate_bytes]`.
     #[cfg(feature = "loader_evm")]
     pub fn generate_evm_verifier_solidity_compressed_proof(&self) -> Result<String> {
-        let loader =
-            self.build_evm_verifier_loader(EvmProofPointEncoding::XSignCompressed)?;
+        let loader = self.build_evm_verifier_loader(EvmProofPointEncoding::XSignCompressed)?;
         Ok(loader.solidity_code())
     }
 
@@ -387,6 +383,16 @@ impl MidnightProofBundle {
     pub fn generate_evm_verifier_bytecode_compressed_proof(&self) -> Result<Vec<u8>> {
         let solidity = self.generate_evm_verifier_solidity_compressed_proof()?;
         Ok(compile_solidity(&solidity))
+    }
+
+    /// Generate compact verifier runtime + data-page artifacts.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_compact_artifacts(&self) -> Result<CompactVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader_with_mode(
+            EvmProofPointEncoding::Uncompressed,
+            EvmCodegenMode::Compact,
+        )?;
+        Ok(loader.compact_verifier_artifacts())
     }
 
     /// Encode calldata expected by the generated Solidity verifier.
@@ -418,6 +424,23 @@ impl MidnightProofBundle {
         let calldata = self.encode_evm_calldata()?;
         snark_verifier::loader::evm::deploy_and_call(bytecode, calldata)
             .map_err(|err| anyhow!("revm deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call compact verifier/runtime pages in local revm.
+    ///
+    /// Returns gas used by the verification call.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_compact(&self) -> Result<u64> {
+        let compact = self.generate_evm_verifier_compact_artifacts()?;
+        let runtime_deployment_code = compile_solidity_via_ir(&compact.runtime_solidity);
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_compact_and_call(
+            compact.page_deployment_codes,
+            runtime_deployment_code,
+            compact.manifest.program_words,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm compact deployment/call failed: {err}"))
     }
 
     /// Convert non-committed instances into halo2-axiom `Fr`.
@@ -470,12 +493,21 @@ impl MidnightProofBundle {
         &self,
         proof_point_encoding: EvmProofPointEncoding,
     ) -> Result<Rc<EvmLoader>> {
+        self.build_evm_verifier_loader_with_mode(proof_point_encoding, EvmCodegenMode::Unrolled)
+    }
+
+    #[cfg(feature = "loader_evm")]
+    fn build_evm_verifier_loader_with_mode(
+        &self,
+        proof_point_encoding: EvmProofPointEncoding,
+        codegen_mode: EvmCodegenMode,
+    ) -> Result<Rc<EvmLoader>> {
         let protocol = self.to_snark_protocol()?;
         let num_instance = protocol.num_instance.clone();
         let dk = self.snark_deciding_key()?;
         let svk = dk.svk();
 
-        let loader = EvmLoader::new::<HaloFq, HaloFr>();
+        let loader = EvmLoader::new_with_mode::<HaloFq, HaloFr>(codegen_mode);
         let protocol = protocol.loaded(&loader);
         let mut transcript = EvmTranscript::<HaloG1Affine, Rc<EvmLoader>, _, _>::new_with_encoding(
             &loader,

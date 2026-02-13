@@ -22,7 +22,10 @@ use itertools::Itertools;
 use rand::{rngs::StdRng, SeedableRng};
 pub use snark_verifier::loader::evm::encode_calldata;
 use snark_verifier::{
-    loader::evm::{compile_solidity, EvmLoader},
+    loader::evm::{
+        compile_solidity, compile_solidity_via_ir, CompactProgramManifest, EvmCodegenMode,
+        EvmLoader,
+    },
     pcs::{
         kzg::{KzgAccumulator, KzgAsVerifyingKey, KzgDecidingKey, KzgSuccinctVerifyingKey},
         AccumulationDecider, AccumulationScheme, PolynomialCommitmentScheme,
@@ -124,11 +127,21 @@ pub trait EvmKzgAccumulationScheme:
 impl EvmKzgAccumulationScheme for crate::GWC {}
 impl EvmKzgAccumulationScheme for crate::SHPLONK {}
 
-pub fn gen_evm_verifier_sol_code<C, AS>(
+#[derive(Clone, Debug)]
+pub struct EvmCompactVerifierArtifacts {
+    pub runtime_solidity: String,
+    pub runtime_deployment_code: Vec<u8>,
+    pub page_runtime_codes: Vec<Vec<u8>>,
+    pub page_deployment_codes: Vec<Vec<u8>>,
+    pub manifest: CompactProgramManifest,
+}
+
+fn build_evm_loader<C, AS>(
     params: &ParamsKZG<Bls12>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
-) -> String
+    codegen_mode: EvmCodegenMode,
+) -> Rc<EvmLoader>
 where
     C: CircuitExt<Fr>,
     AS: EvmKzgAccumulationScheme,
@@ -140,10 +153,9 @@ where
             .with_num_instance(num_instance.clone())
             .with_accumulator_indices(C::accumulator_indices()),
     );
-    // deciding key
     let dk = (params.get_g()[0], params.g2(), params.s_g2()).into();
 
-    let loader = EvmLoader::new::<Fq, Fr>();
+    let loader = EvmLoader::new_with_mode::<Fq, Fr>(codegen_mode);
     let protocol = protocol.loaded(&loader);
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
@@ -151,7 +163,44 @@ where
     let proof =
         PlonkVerifier::<AS>::read_proof(&dk, &protocol, &instances, &mut transcript).unwrap();
     PlonkVerifier::<AS>::verify(&dk, &protocol, &instances, &proof).unwrap();
-    loader.solidity_code()
+    loader
+}
+
+pub fn gen_evm_verifier_sol_code<C, AS>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+) -> String
+where
+    C: CircuitExt<Fr>,
+    AS: EvmKzgAccumulationScheme,
+{
+    build_evm_loader::<C, AS>(params, vk, num_instance, EvmCodegenMode::Unrolled).solidity_code()
+}
+
+pub fn gen_evm_verifier_compact_artifacts<C, AS>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts
+where
+    C: CircuitExt<Fr>,
+    AS: EvmKzgAccumulationScheme,
+{
+    let loader = build_evm_loader::<C, AS>(params, vk, num_instance, EvmCodegenMode::Compact);
+    let compact = loader.compact_verifier_artifacts();
+    if let Some(path) = path {
+        path.parent().and_then(|dir| fs::create_dir_all(dir).ok()).unwrap();
+        fs::write(path, &compact.runtime_solidity).unwrap();
+    }
+    EvmCompactVerifierArtifacts {
+        runtime_deployment_code: compile_solidity_via_ir(&compact.runtime_solidity),
+        runtime_solidity: compact.runtime_solidity,
+        page_runtime_codes: compact.page_runtime_codes,
+        page_deployment_codes: compact.page_deployment_codes,
+        manifest: compact.manifest,
+    }
 }
 
 pub fn gen_evm_verifier<C, AS>(
@@ -191,6 +240,24 @@ pub fn gen_evm_verifier_shplonk<C: CircuitExt<Fr>>(
     gen_evm_verifier::<C, SHPLONK>(params, vk, num_instance, path)
 }
 
+pub fn gen_evm_verifier_compact_artifacts_gwc<C: CircuitExt<Fr>>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts {
+    gen_evm_verifier_compact_artifacts::<C, GWC>(params, vk, num_instance, path)
+}
+
+pub fn gen_evm_verifier_compact_artifacts_shplonk<C: CircuitExt<Fr>>(
+    params: &ParamsKZG<Bls12>,
+    vk: &VerifyingKey<G1Affine>,
+    num_instance: Vec<usize>,
+    path: Option<&Path>,
+) -> EvmCompactVerifierArtifacts {
+    gen_evm_verifier_compact_artifacts::<C, SHPLONK>(params, vk, num_instance, path)
+}
+
 #[cfg(feature = "revm")]
 pub fn evm_verify(
     deployment_code: Vec<u8>,
@@ -200,6 +267,24 @@ pub fn evm_verify(
     let calldata = encode_calldata(&instances, &proof);
     let gas_cost = snark_verifier::loader::evm::deploy_and_call(deployment_code, calldata)?;
     dbg!(gas_cost);
+    Ok(gas_cost)
+}
+
+#[cfg(feature = "revm")]
+pub fn evm_verify_compact(
+    runtime_deployment_code: Vec<u8>,
+    page_deployment_codes: Vec<Vec<u8>>,
+    program_words: usize,
+    instances: Vec<Vec<Fr>>,
+    proof: Vec<u8>,
+) -> Result<u64, String> {
+    let calldata = encode_calldata(&instances, &proof);
+    let gas_cost = snark_verifier::loader::evm::deploy_compact_and_call(
+        page_deployment_codes,
+        runtime_deployment_code,
+        program_words,
+        calldata,
+    )?;
     Ok(gas_cost)
 }
 

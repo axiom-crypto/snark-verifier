@@ -6,7 +6,8 @@
 
 use ff::Field;
 use halo2_base::halo2_proofs::halo2curves::{
-    ff::PrimeField as HaloPrimeField, Coordinates as HaloCoordinates, CurveAffine as HaloCurveAffine,
+    ff::PrimeField as HaloPrimeField, Coordinates as HaloCoordinates,
+    CurveAffine as HaloCurveAffine,
 };
 use midnight_circuits::{
     ecc::{
@@ -55,6 +56,8 @@ type C = <S as SelfEmulation>::C;
 type E = <S as SelfEmulation>::Engine;
 type CBase = <C as CircuitCurve>::Base;
 type NG = NativeGadget<F, P2RDecompositionChip<F>, NativeChip<F>>;
+type CurveChip = ForeignEccChip<F, C, C, NG, NG>;
+type AssignedPoint = <CurveChip as EccInstructions<F, C>>::Point;
 
 const K: u32 = 20;
 
@@ -75,6 +78,15 @@ struct IvcCircuit {
     prev_state: Value<F>,
     prev_proof: Value<Vec<u8>>,
     prev_acc: Value<Accumulator<S>>,
+    fixed_bases: BTreeMap<String, C>,
+}
+
+fn fully_collapsed_accumulator_as_public_input(
+    acc: &Accumulator<S>,
+    fixed_bases: &BTreeMap<String, C>,
+) -> Vec<F> {
+    let (lhs, rhs) = acc.fully_collapse(fixed_bases);
+    [AssignedPoint::as_public_input(&lhs), AssignedPoint::as_public_input(&rhs)].concat()
 }
 
 fn configure_ivc_circuit(
@@ -175,13 +187,34 @@ impl Circuit<F> for IvcCircuit {
                 self.prev_acc.clone(),
             )?
         };
+        let mut fixed_base_names = vec![String::from("com_instance")];
+        fixed_base_names.extend(verifier::fixed_base_names::<S>(
+            self_vk_name,
+            self_cs.num_fixed_columns() + self_cs.num_selectors(),
+            self_cs.permutation().columns.len(),
+        ));
+        let assigned_fixed_bases: BTreeMap<String, AssignedPoint> = fixed_base_names
+            .iter()
+            .map(|name| {
+                let base = self.fixed_bases.get(name).cloned().unwrap_or_default();
+                let assigned = curve_chip.assign(&mut layouter, Value::known(base))?;
+                Ok((name.clone(), assigned))
+            })
+            .collect::<Result<_, Error>>()?;
+        let (prev_acc_lhs, prev_acc_rhs) = prev_acc.fully_collapse_with_assigned_fixed_bases(
+            &mut layouter,
+            &curve_chip,
+            &assigned_fixed_bases,
+        )?;
+        let mut prev_acc_pi = curve_chip.as_public_input(&mut layouter, &prev_acc_lhs)?;
+        prev_acc_pi.extend(curve_chip.as_public_input(&mut layouter, &prev_acc_rhs)?);
 
         let id_point = curve_chip.assign_fixed(&mut layouter, C::default())?;
 
         let assigned_pi = [
             verifier_chip.as_public_input(&mut layouter, &assigned_self_vk)?,
             vec![prev_state.clone()],
-            verifier_chip.as_public_input(&mut layouter, &prev_acc)?,
+            prev_acc_pi,
         ]
         .into_iter()
         .flatten()
@@ -216,7 +249,13 @@ impl Circuit<F> for IvcCircuit {
         )?;
 
         next_acc.collapse(&mut layouter, &curve_chip, &scalar_chip)?;
-        verifier_chip.constrain_as_public_input(&mut layouter, &next_acc)?;
+        let (next_acc_lhs, next_acc_rhs) = next_acc.fully_collapse_with_assigned_fixed_bases(
+            &mut layouter,
+            &curve_chip,
+            &assigned_fixed_bases,
+        )?;
+        curve_chip.constrain_as_public_input(&mut layouter, &next_acc_lhs)?;
+        curve_chip.constrain_as_public_input(&mut layouter, &next_acc_rhs)?;
 
         core_decomp_chip.load(&mut layouter)
     }
@@ -234,6 +273,7 @@ fn main() {
         prev_state: Value::unknown(),
         prev_proof: Value::unknown(),
         prev_acc: Value::unknown(),
+        fixed_bases: BTreeMap::new(),
     };
 
     let srs = ParamsKZG::<Bls12>::unsafe_setup(self_k, OsRng);
@@ -265,10 +305,19 @@ fn main() {
         prev_state: Value::known(F::ZERO),
         prev_proof: Value::known(vec![]),
         prev_acc: Value::known(trivial_acc.clone()),
+        fixed_bases: fixed_bases.clone(),
     };
+    let field_bytes = <F as ff::PrimeField>::Repr::default().as_ref().len();
+
     let mut public_inputs0 = AssignedVk::<S>::as_public_input(&vk);
     public_inputs0.extend(AssignedNative::<F>::as_public_input(&state0));
-    public_inputs0.extend(AssignedAccumulator::as_public_input(&acc0));
+    let collapsed_acc0_pi = fully_collapsed_accumulator_as_public_input(&acc0, &fixed_bases);
+    println!(
+        "collapsed accumulator (step 0): {} field elements ({} bytes)",
+        collapsed_acc0_pi.len(),
+        collapsed_acc0_pi.len() * field_bytes
+    );
+    public_inputs0.extend(collapsed_acc0_pi);
 
     let start = Instant::now();
     let proof0 = {
@@ -317,10 +366,17 @@ fn main() {
         prev_state: Value::known(state0),
         prev_proof: Value::known(proof0),
         prev_acc: Value::known(acc0),
+        fixed_bases: fixed_bases.clone(),
     };
     let mut public_inputs1 = AssignedVk::<S>::as_public_input(&vk);
     public_inputs1.extend(AssignedNative::<F>::as_public_input(&state1));
-    public_inputs1.extend(AssignedAccumulator::as_public_input(&acc1));
+    let collapsed_acc1_pi = fully_collapsed_accumulator_as_public_input(&acc1, &fixed_bases);
+    println!(
+        "collapsed accumulator (step 1): {} field elements ({} bytes)",
+        collapsed_acc1_pi.len(),
+        collapsed_acc1_pi.len() * field_bytes
+    );
+    public_inputs1.extend(collapsed_acc1_pi);
 
     let start = Instant::now();
     let proof = {
@@ -408,24 +464,83 @@ fn main() {
         .expect("failed to generate Solidity verifier source");
     let bytecode =
         bundle.generate_evm_verifier_bytecode().expect("failed to compile Solidity verifier");
+    let runtime_bytecode =
+        snark_verifier_sdk::snark_verifier::loader::evm::compile_solidity_runtime(&solidity);
+    let compact = bundle
+        .generate_evm_verifier_compact_artifacts()
+        .expect("failed to generate compact verifier artifacts");
+    let compact_runtime_deployment =
+        snark_verifier_sdk::snark_verifier::loader::evm::compile_solidity_via_ir(
+            &compact.runtime_solidity,
+        );
+    let compact_runtime_code =
+        snark_verifier_sdk::snark_verifier::loader::evm::compile_solidity_runtime_via_ir(
+            &compact.runtime_solidity,
+        );
+    let compact_page_sizes =
+        compact.page_runtime_codes.iter().map(|page| page.len()).collect::<Vec<_>>();
+    let compact_total_deployed_code =
+        compact_runtime_code.len() + compact_page_sizes.iter().sum::<usize>();
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
 
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
     let solidity_path = out_dir.join("MidnightIvcVerifier.sol");
     let bytecode_path = out_dir.join("midnight_ivc.bytecode");
     let calldata_path = out_dir.join("midnight_ivc.calldata");
+    let compact_solidity_path = out_dir.join("MidnightIvcVerifierCompact.sol");
+    let compact_runtime_path = out_dir.join("midnight_ivc_compact_runtime.bytecode");
+    let compact_pages_path = out_dir.join("midnight_ivc_compact_pages.bytecode");
+    let compact_manifest_path = out_dir.join("midnight_ivc_compact_manifest.txt");
 
     std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
     std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
         .expect("failed to write verifier bytecode");
     std::fs::write(&calldata_path, hex::encode(&calldata)).expect("failed to write calldata");
+    std::fs::write(&compact_solidity_path, &compact.runtime_solidity)
+        .expect("failed to write compact Solidity verifier");
+    std::fs::write(
+        &compact_runtime_path,
+        format!("0x{}", hex::encode(&compact_runtime_deployment)),
+    )
+    .expect("failed to write compact verifier runtime deployment bytecode");
+    let compact_pages_lines = compact
+        .page_deployment_codes
+        .iter()
+        .enumerate()
+        .map(|(idx, code)| format!("page[{idx}] = 0x{}", hex::encode(code)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&compact_pages_path, compact_pages_lines)
+        .expect("failed to write compact page deployment bytecodes");
+    let compact_manifest = format!(
+        "opcode_version: {}\npage_size_bytes: {}\nprogram_words: {}\npage_word_offsets: {:?}\npage_word_counts: {:?}\n",
+        compact.manifest.opcode_version,
+        compact.manifest.page_size_bytes,
+        compact.manifest.program_words,
+        compact.manifest.page_word_offsets,
+        compact.manifest.page_word_counts,
+    );
+    std::fs::write(&compact_manifest_path, compact_manifest)
+        .expect("failed to write compact manifest");
 
     println!("proof bytes: {}", proof.len());
-    println!("deployment code bytes: {}", bytecode.len());
+    println!("unrolled deployment code bytes: {}", bytecode.len());
+    println!("unrolled runtime code bytes: {}", runtime_bytecode.len());
+    println!("compact runtime deployment code bytes: {}", compact_runtime_deployment.len());
+    println!("compact verifier runtime code bytes: {}", compact_runtime_code.len());
+    println!("compact page runtime sizes (bytes): {:?}", compact_page_sizes);
+    println!(
+        "compact total deployed runtime code bytes (verifier + pages): {}",
+        compact_total_deployed_code
+    );
     println!("calldata bytes: {}", calldata.len());
     println!("wrote {}", solidity_path.display());
     println!("wrote {}", bytecode_path.display());
     println!("wrote {}", calldata_path.display());
+    println!("wrote {}", compact_solidity_path.display());
+    println!("wrote {}", compact_runtime_path.display());
+    println!("wrote {}", compact_pages_path.display());
+    println!("wrote {}", compact_manifest_path.display());
 
     #[cfg(feature = "revm")]
     {
@@ -440,6 +555,17 @@ fn main() {
                 println!(
                     "note: native snark-verifier EVM-transcript verification succeeded above; this indicates a local revm/precompile divergence for this large IVC verifier"
                 );
+            }
+        }
+
+        match bundle.verify_with_generated_solidity_revm_compact() {
+            Ok(gas) => println!("revm compact gas: {gas}"),
+            Err(err) => {
+                let err_message = err.to_string();
+                if let Some(gas) = extract_revm_gas(&err_message) {
+                    println!("revm compact gas (reverted): {gas}");
+                }
+                println!("revm compact verification failed: {err_message}");
             }
         }
     }

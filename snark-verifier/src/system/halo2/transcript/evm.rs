@@ -117,8 +117,7 @@ where
         } else if self.buf.len() == 0x20 {
             assert_eq!(self.loader.ptr(), self.buf.end());
             let buf_end = self.buf.end();
-            let code = format!("mstore8({buf_end}, 1)");
-            self.loader.code_mut().runtime_append(code);
+            self.loader.emit_mstore8(buf_end, 1);
             0x21
         } else {
             self.buf.len()
@@ -127,14 +126,8 @@ where
 
         let challenge_ptr = self.loader.allocate(0x20);
         let dup_hash_ptr = self.loader.allocate(0x20);
-        let code = format!(
-            "{{
-            let hash := mload({hash_ptr:#x})
-            mstore({challenge_ptr:#x}, mod(hash, f_q))
-            mstore({dup_hash_ptr:#x}, hash)
-        }}"
-        );
-        self.loader.code_mut().runtime_append(code);
+        self.loader.emit_mod_from_mem(challenge_ptr, hash_ptr);
+        self.loader.emit_mstore_mem(dup_hash_ptr, hash_ptr);
 
         self.buf.reset(dup_hash_ptr);
         self.buf.extend(0x20);
@@ -199,9 +192,7 @@ where
             }
             Value::Memory(ptr) => {
                 if self.buf.len() == 0x20 && self.buf_is_placeholder {
-                    self.loader
-                        .code_mut()
-                        .runtime_append(format!("mstore({:#x}, mload({ptr:#x}))", self.buf.ptr()));
+                    self.loader.emit_mstore_mem(self.buf.ptr(), ptr);
                     self.buf_is_placeholder = false;
                 } else if self.buf.end() == ptr {
                     self.buf.extend(0x20);
@@ -209,9 +200,7 @@ where
                 } else {
                     let dst = self.loader.allocate(0x20);
                     assert_eq!(self.buf.end(), dst);
-                    self.loader
-                        .code_mut()
-                        .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                    self.loader.emit_mstore_mem(dst, ptr);
                     self.buf.extend(0x20);
                     self.buf_is_placeholder = false;
                 }

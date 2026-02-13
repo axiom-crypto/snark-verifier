@@ -1,7 +1,11 @@
 use crate::{
     loader::{
         evm::{
-            code::{Precompiled, SolidityAssemblyCode},
+            code::{EvmCodegenMode, Precompiled, SolidityAssemblyCode},
+            compact_codegen::{build_compact_verifier_artifacts, CompactVerifierArtifacts},
+            compact_ir::{
+                CompactInstruction, CompactOperand, CompactProgram, CompactProgramBuilder,
+            },
             fe_to_u256, modulus, u256_to_fe, U256, U512,
         },
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
@@ -17,7 +21,7 @@ use std::{
     collections::HashMap,
     fmt::{self, Debug},
     iter,
-    ops::{Add, AddAssign, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     rc::Rc,
 };
 
@@ -59,6 +63,7 @@ impl<T: Debug> Value<T> {
 #[derive(Clone, Debug)]
 pub struct EvmLoader {
     scalar_modulus: U256,
+    codegen_mode: EvmCodegenMode,
     base_field_bytes: usize,
     base_modulus_words: [U256; 2],
     base_sqrt_exp_words: [U256; 2],
@@ -66,6 +71,7 @@ pub struct EvmLoader {
     compressed_rhs_ptr: usize,
     compressed_y_sq_ptr: usize,
     code: RefCell<SolidityAssemblyCode>,
+    compact_program: RefCell<CompactProgramBuilder>,
     ptr: RefCell<usize>,
     cache: RefCell<HashMap<String, usize>>,
 }
@@ -115,6 +121,15 @@ impl EvmLoader {
         Base: PrimeField,
         Scalar: PrimeField<Repr = [u8; 32]>,
     {
+        Self::new_with_mode::<Base, Scalar>(EvmCodegenMode::Unrolled)
+    }
+
+    /// Initialize a [`EvmLoader`] with the selected EVM codegen mode.
+    pub fn new_with_mode<Base, Scalar>(codegen_mode: EvmCodegenMode) -> Rc<Self>
+    where
+        Base: PrimeField,
+        Scalar: PrimeField<Repr = [u8; 32]>,
+    {
         let base_field_bytes = Base::Repr::default().as_ref().len();
         assert!(
             base_field_bytes <= BLS_ENCODED_FP_BYTES,
@@ -134,6 +149,7 @@ impl EvmLoader {
 
         Rc::new(Self {
             scalar_modulus,
+            codegen_mode,
             base_field_bytes,
             base_modulus_words,
             base_sqrt_exp_words,
@@ -141,6 +157,7 @@ impl EvmLoader {
             compressed_rhs_ptr,
             compressed_y_sq_ptr,
             code: RefCell::new(code),
+            compact_program: RefCell::new(CompactProgramBuilder::new()),
             ptr: RefCell::new(ptr),
             cache: Default::default(),
         })
@@ -149,15 +166,42 @@ impl EvmLoader {
     /// Returns generated Solidity code. This is "Solidity" code that is wrapped in an assembly block.
     /// In other words, it's basically just assembly (equivalently, Yul).
     pub fn solidity_code(self: &Rc<Self>) -> String {
-        let code = "
-            // Revert if anything fails
-            if iszero(success) { revert(0, 0) }
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let code = "
+                    // Revert if anything fails
+                    if iszero(success) { revert(0, 0) }
 
-            // Return empty bytes on success
-            return(0, 0)"
-            .to_string();
-        self.code.borrow_mut().runtime_append(code);
-        self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
+                    // Return empty bytes on success
+                    return(0, 0)"
+                    .to_string();
+                self.code.borrow_mut().runtime_append(code);
+                self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
+            }
+            EvmCodegenMode::Compact => self.compact_verifier_artifacts().runtime_solidity,
+        }
+    }
+
+    /// Returns the selected codegen mode.
+    pub fn codegen_mode(&self) -> EvmCodegenMode {
+        self.codegen_mode
+    }
+
+    /// Returns the compact encoded program, if compact mode is enabled.
+    pub fn compact_program(&self) -> Option<CompactProgram> {
+        (self.codegen_mode == EvmCodegenMode::Compact)
+            .then(|| self.compact_program.borrow().encode())
+    }
+
+    /// Returns compact verifier runtime source plus data-page artifacts.
+    pub fn compact_verifier_artifacts(&self) -> CompactVerifierArtifacts {
+        assert_eq!(
+            self.codegen_mode,
+            EvmCodegenMode::Compact,
+            "compact verifier artifacts are only available in compact mode"
+        );
+        let program = self.compact_program.borrow().encode();
+        build_compact_verifier_artifacts(self.scalar_modulus, &program)
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.
@@ -183,8 +227,94 @@ impl EvmLoader {
         BLS_G1_BYTES
     }
 
-    pub(crate) fn code_mut(&self) -> impl DerefMut<Target = SolidityAssemblyCode> + '_ {
-        self.code.borrow_mut()
+    fn compact_emit(&self, instruction: CompactInstruction) {
+        self.compact_program.borrow_mut().push(instruction);
+    }
+
+    fn emit_mstore_const(self: &Rc<Self>, ptr: usize, value: U256) {
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                self.code
+                    .borrow_mut()
+                    .runtime_append(format!("mstore({ptr:#x}, {})", hex_encode_u256(&value)));
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::MstoreConst { dst: ptr, value });
+            }
+        }
+    }
+
+    pub(crate) fn emit_mstore_mem(self: &Rc<Self>, dst: usize, src: usize) {
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                self.code.borrow_mut().runtime_append(format!("mstore({dst:#x}, mload({src:#x}))"));
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::MstoreMem { dst, src });
+            }
+        }
+    }
+
+    pub(crate) fn emit_mstore8(self: &Rc<Self>, dst: usize, value: u8) {
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                self.code.borrow_mut().runtime_append(format!("mstore8({dst:#x}, {value})"));
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::Mstore8 { dst, value });
+            }
+        }
+    }
+
+    pub(crate) fn emit_mod_from_mem(self: &Rc<Self>, dst: usize, src: usize) {
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                self.code
+                    .borrow_mut()
+                    .runtime_append(format!("mstore({dst:#x}, mod(mload({src:#x}), f_q))"));
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::ModFromMem { dst, src });
+            }
+        }
+    }
+
+    fn compact_operand(self: &Rc<Self>, value: &Value<U256>) -> CompactOperand {
+        match value {
+            Value::Constant(constant) => CompactOperand::Constant(*constant),
+            Value::Memory(ptr) => CompactOperand::Memory(*ptr),
+            _ => {
+                let scalar = self.scalar(value.clone());
+                CompactOperand::Memory(scalar.ptr())
+            }
+        }
+    }
+
+    fn compact_emit_scalar_value(self: &Rc<Self>, dst: usize, value: &Value<U256>) {
+        match value {
+            Value::Constant(constant) => {
+                self.compact_emit(CompactInstruction::MstoreConst { dst, value: *constant })
+            }
+            Value::Memory(src) => {
+                if *src != dst {
+                    self.compact_emit(CompactInstruction::MstoreMem { dst, src: *src });
+                }
+            }
+            Value::Negated(inner) => {
+                let operand = self.compact_operand(inner);
+                self.compact_emit(CompactInstruction::ScalarNeg { dst, operand });
+            }
+            Value::Sum(lhs, rhs) => {
+                let lhs = self.compact_operand(lhs);
+                let rhs = self.compact_operand(rhs);
+                self.compact_emit(CompactInstruction::ScalarAdd { dst, lhs, rhs });
+            }
+            Value::Product(lhs, rhs) => {
+                let lhs = self.compact_operand(lhs);
+                let rhs = self.compact_operand(rhs);
+                self.compact_emit(CompactInstruction::ScalarMul { dst, lhs, rhs });
+            }
+        }
     }
 
     fn push(self: &Rc<Self>, scalar: &Scalar) -> String {
@@ -215,8 +345,15 @@ impl EvmLoader {
     /// Calldata load a field element.
     pub fn calldataload_scalar(self: &Rc<Self>, offset: usize) -> Scalar {
         let ptr = self.allocate(0x20);
-        let code = format!("mstore({ptr:#x}, mod(calldataload({offset:#x}), f_q))");
-        self.code.borrow_mut().runtime_append(code);
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let code = format!("mstore({ptr:#x}, mod(calldataload({offset:#x}), f_q))");
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::CalldataScalar { dst: ptr, offset });
+            }
+        }
         self.scalar(Value::Memory(ptr))
     }
 
@@ -224,27 +361,38 @@ impl EvmLoader {
     /// Note that identity will cause the verification to fail.
     pub fn calldataload_ec_point(self: &Rc<Self>, offset: usize) -> EcPoint {
         let x_ptr = self.allocate(BLS_G1_BYTES);
-        let y_ptr = x_ptr + BLS_ENCODED_FP_BYTES;
-        let coord_bytes = self.base_field_bytes;
-        let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
-        let x_cd_ptr = offset;
-        let y_cd_ptr = offset + coord_bytes;
-        let code = format!(
-            "
-        {{
-            mstore({x_ptr:#x}, 0)
-            mstore({:#x}, 0)
-            mstore({y_ptr:#x}, 0)
-            mstore({:#x}, 0)
-            calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
-            calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}",
-            x_ptr + 0x20,
-            y_ptr + 0x20,
-            x_ptr + pad,
-            y_ptr + pad
-        );
-        self.code.borrow_mut().runtime_append(code);
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let y_ptr = x_ptr + BLS_ENCODED_FP_BYTES;
+                let coord_bytes = self.base_field_bytes;
+                let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
+                let x_cd_ptr = offset;
+                let y_cd_ptr = offset + coord_bytes;
+                let code = format!(
+                    "
+                {{
+                    mstore({x_ptr:#x}, 0)
+                    mstore({:#x}, 0)
+                    mstore({y_ptr:#x}, 0)
+                    mstore({:#x}, 0)
+                    calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
+                    calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
+                }}",
+                    x_ptr + 0x20,
+                    y_ptr + 0x20,
+                    x_ptr + pad,
+                    y_ptr + pad
+                );
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::CalldataPointUncompressed {
+                    dst: x_ptr,
+                    offset,
+                    coord_bytes: self.base_field_bytes,
+                });
+            }
+        }
         self.ec_point(Value::Memory(x_ptr))
     }
 
@@ -255,6 +403,10 @@ impl EvmLoader {
     ///
     /// This decompresses into EIP-2537 uncompressed `(x, y)` form in memory.
     pub fn calldataload_ec_point_compressed(self: &Rc<Self>, offset: usize) -> EcPoint {
+        if self.codegen_mode == EvmCodegenMode::Compact {
+            panic!("compact EVM codegen does not support compressed proof-point encoding yet");
+        }
+
         let point_ptr = self.allocate(BLS_G1_BYTES);
         let x_ptr = point_ptr;
         let y_ptr = point_ptr + BLS_ENCODED_FP_BYTES;
@@ -425,54 +577,80 @@ impl EvmLoader {
         y_limbs: [&Scalar; LIMBS],
     ) -> EcPoint {
         let ptr = self.allocate(BLS_G1_BYTES);
-        let mut code = String::new();
-        let x_ptr = ptr;
-        code.push_str("let x_lo := 0\n");
-        code.push_str("let x_hi := 0\n");
-        for (idx, limb) in x_limbs.iter().enumerate() {
-            let limb_i = self.push(limb);
-            let shift = idx * BITS;
-            assert!(shift < 512, "limb decomposition exceeds 512 bits");
-            if shift < 256 {
-                code.push_str(format!("x_lo := add(x_lo, shl({shift}, {limb_i}))\n").as_str());
-            } else {
-                code.push_str(
-                    format!("x_hi := add(x_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let mut code = String::new();
+                let x_ptr = ptr;
+                code.push_str("let x_lo := 0\n");
+                code.push_str("let x_hi := 0\n");
+                for (idx, limb) in x_limbs.iter().enumerate() {
+                    let limb_i = self.push(limb);
+                    let shift = idx * BITS;
+                    assert!(shift < 512, "limb decomposition exceeds 512 bits");
+                    if shift < 256 {
+                        code.push_str(
+                            format!("x_lo := add(x_lo, shl({shift}, {limb_i}))\n").as_str(),
+                        );
+                    } else {
+                        code.push_str(
+                            format!("x_hi := add(x_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
+                        );
+                    }
+                }
+                code.push_str(format!("mstore({x_ptr:#x}, x_hi)\n").as_str());
+                code.push_str(format!("mstore({:#x}, x_lo)\n", x_ptr + 0x20).as_str());
+
+                let y_ptr = ptr + BLS_ENCODED_FP_BYTES;
+                code.push_str("let y_lo := 0\n");
+                code.push_str("let y_hi := 0\n");
+                for (idx, limb) in y_limbs.iter().enumerate() {
+                    let limb_i = self.push(limb);
+                    let shift = idx * BITS;
+                    assert!(shift < 512, "limb decomposition exceeds 512 bits");
+                    if shift < 256 {
+                        code.push_str(
+                            format!("y_lo := add(y_lo, shl({shift}, {limb_i}))\n").as_str(),
+                        );
+                    } else {
+                        code.push_str(
+                            format!("y_hi := add(y_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
+                        );
+                    }
+                }
+                code.push_str(format!("mstore({y_ptr:#x}, y_hi)\n").as_str());
+                code.push_str(format!("mstore({:#x}, y_lo)\n", y_ptr + 0x20).as_str());
+
+                let code = format!(
+                    "{{
+                    {code}
+                }}"
                 );
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                let x_limbs = x_limbs
+                    .iter()
+                    .map(|limb| self.compact_operand(&limb.value))
+                    .collect::<Vec<_>>();
+                let y_limbs = y_limbs
+                    .iter()
+                    .map(|limb| self.compact_operand(&limb.value))
+                    .collect::<Vec<_>>();
+                self.compact_emit(CompactInstruction::PointFromLimbs {
+                    dst: ptr,
+                    bits: BITS,
+                    x_limbs,
+                    y_limbs,
+                });
             }
         }
-        code.push_str(format!("mstore({x_ptr:#x}, x_hi)\n").as_str());
-        code.push_str(format!("mstore({:#x}, x_lo)\n", x_ptr + 0x20).as_str());
-
-        let y_ptr = ptr + BLS_ENCODED_FP_BYTES;
-        code.push_str("let y_lo := 0\n");
-        code.push_str("let y_hi := 0\n");
-        for (idx, limb) in y_limbs.iter().enumerate() {
-            let limb_i = self.push(limb);
-            let shift = idx * BITS;
-            assert!(shift < 512, "limb decomposition exceeds 512 bits");
-            if shift < 256 {
-                code.push_str(format!("y_lo := add(y_lo, shl({shift}, {limb_i}))\n").as_str());
-            } else {
-                code.push_str(
-                    format!("y_hi := add(y_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
-                );
-            }
-        }
-        code.push_str(format!("mstore({y_ptr:#x}, y_hi)\n").as_str());
-        code.push_str(format!("mstore({:#x}, y_lo)\n", y_ptr + 0x20).as_str());
-
-        let code = format!(
-            "{{
-            {code}
-        }}"
-        );
-        self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(ptr))
     }
 
     pub(crate) fn scalar(self: &Rc<Self>, value: Value<U256>) -> Scalar {
-        let value = if matches!(value, Value::Constant(_) | Value::Memory(_) | Value::Negated(_)) {
+        let value = if matches!(value, Value::Constant(_) | Value::Memory(_))
+            || (self.codegen_mode == EvmCodegenMode::Unrolled && matches!(value, Value::Negated(_)))
+        {
             value
         } else {
             let identifier = value.identifier();
@@ -480,9 +658,16 @@ impl EvmLoader {
             let ptr = if let Some(ptr) = some_ptr {
                 ptr
             } else {
-                let v = self.push(&Scalar { loader: self.clone(), value });
                 let ptr = self.allocate(0x20);
-                self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {v})"));
+                match self.codegen_mode {
+                    EvmCodegenMode::Unrolled => {
+                        let v = self.push(&Scalar { loader: self.clone(), value });
+                        self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {v})"));
+                    }
+                    EvmCodegenMode::Compact => {
+                        self.compact_emit_scalar_value(ptr, &value);
+                    }
+                }
                 self.cache.borrow_mut().insert(identifier, ptr);
                 ptr
             };
@@ -499,15 +684,29 @@ impl EvmLoader {
     /// hash.
     pub fn keccak256(self: &Rc<Self>, ptr: usize, len: usize) -> usize {
         let hash_ptr = self.allocate(0x20);
-        let code = format!("mstore({hash_ptr:#x}, keccak256({ptr:#x}, {len}))");
-        self.code.borrow_mut().runtime_append(code);
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let code = format!("mstore({hash_ptr:#x}, keccak256({ptr:#x}, {len}))");
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::Keccak { dst: hash_ptr, ptr, len });
+            }
+        }
         hash_ptr
     }
 
     /// Copies a field element into given `ptr`.
     pub fn copy_scalar(self: &Rc<Self>, scalar: &Scalar, ptr: usize) {
-        let scalar = self.push(scalar);
-        self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {scalar})"));
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let scalar = self.push(scalar);
+                self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {scalar})"));
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit_scalar_value(ptr, &scalar.value);
+            }
+        }
     }
 
     /// Allocates a new field element and copies the given value into it.
@@ -520,20 +719,25 @@ impl EvmLoader {
     /// Allocates a new elliptic curve point and copies the given value into it.
     pub fn copy_ec_point(self: &Rc<Self>, value: &EcPoint, ptr: usize) {
         match value.value {
-            Value::Memory(src_ptr) => {
-                let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
-                let dst_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| ptr + idx * 0x20);
-                let stores = dst_words
-                    .zip(src_words)
-                    .map(|(dst, src)| format!("mstore({dst:#x}, mload({src:#x}))"))
-                    .join("\n");
-                let code = format!(
-                    "{{
-                    {stores}
-                }}"
-                );
-                self.code.borrow_mut().runtime_append(code);
-            }
+            Value::Memory(src_ptr) => match self.codegen_mode {
+                EvmCodegenMode::Unrolled => {
+                    let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
+                    let dst_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| ptr + idx * 0x20);
+                    let stores = dst_words
+                        .zip(src_words)
+                        .map(|(dst, src)| format!("mstore({dst:#x}, mload({src:#x}))"))
+                        .join("\n");
+                    let code = format!(
+                        "{{
+                            {stores}
+                        }}"
+                    );
+                    self.code.borrow_mut().runtime_append(code);
+                }
+                EvmCodegenMode::Compact => {
+                    self.compact_emit(CompactInstruction::CopyPoint { dst: ptr, src: src_ptr });
+                }
+            },
             Value::Constant(_) | Value::Negated(_) | Value::Sum(_, _) | Value::Product(_, _) => {
                 unreachable!()
             }
@@ -548,18 +752,29 @@ impl EvmLoader {
     }
 
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
-        let (cd_len, rd_len) = match precompile {
-            Precompiled::BigModExp => (0xc0, 0x20),
-            Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
-            // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
-            Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
-            // 2 pairings in one call:
-            //   [G1 (128) || G2 (256)] * 2 = 768 bytes
-            Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
-        };
-        let a = precompile as usize;
-        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
-        self.code.borrow_mut().runtime_append(code);
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let (cd_len, rd_len) = match precompile {
+                    Precompiled::BigModExp => (0xc0, 0x20),
+                    Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
+                    // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
+                    Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
+                    // 2 pairings in one call:
+                    //   [G1 (128) || G2 (256)] * 2 = 768 bytes
+                    Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
+                };
+                let a = precompile as usize;
+                let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::StaticCall {
+                    precompile: precompile as usize,
+                    cd_ptr,
+                    rd_ptr,
+                });
+            }
+        }
     }
 
     fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
@@ -608,37 +823,29 @@ impl EvmLoader {
 
         let rd_ptr = self.dup_ec_point(lhs).ptr();
         self.allocate(BLS_G2_BYTES);
-        let g2_code = g2
-            .iter()
-            .enumerate()
-            .map(|(idx, word)| {
-                format!(
-                    "mstore({:#x}, {})",
-                    rd_ptr + BLS_G1_BYTES + idx * 0x20,
-                    hex_encode_u256(word)
-                )
-            })
-            .join("\n");
-        self.code.borrow_mut().runtime_append(g2_code);
+        for (idx, word) in g2.iter().enumerate() {
+            self.emit_mstore_const(rd_ptr + BLS_G1_BYTES + idx * 0x20, *word);
+        }
 
         self.dup_ec_point(rhs);
         self.allocate(BLS_G2_BYTES);
-        let minus_s_g2_code = minus_s_g2
-            .iter()
-            .enumerate()
-            .map(|(idx, word)| {
-                format!(
-                    "mstore({:#x}, {})",
-                    rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
-                    hex_encode_u256(word)
-                )
-            })
-            .join("\n");
-        self.code.borrow_mut().runtime_append(minus_s_g2_code);
+        for (idx, word) in minus_s_g2.iter().enumerate() {
+            self.emit_mstore_const(
+                rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
+                *word,
+            );
+        }
 
         self.staticcall(Precompiled::Bls12_381Pairing, rd_ptr, rd_ptr);
-        let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
-        self.code.borrow_mut().runtime_append(code);
+        match self.codegen_mode {
+            EvmCodegenMode::Unrolled => {
+                let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
+                self.code.borrow_mut().runtime_append(code);
+            }
+            EvmCodegenMode::Compact => {
+                self.compact_emit(CompactInstruction::AssertOne { ptr: rd_ptr });
+            }
+        }
     }
 
     fn add(self: &Rc<Self>, lhs: &Scalar, rhs: &Scalar) -> Scalar {
@@ -909,24 +1116,10 @@ where
         };
 
         let ptr = self.allocate(BLS_G1_BYTES);
-        let code = format!(
-            "
-        {{
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-        }}",
-            ptr,
-            hex_encode_u256(&x_words[0]),
-            ptr + 0x20,
-            hex_encode_u256(&x_words[1]),
-            ptr + BLS_ENCODED_FP_BYTES,
-            hex_encode_u256(&y_words[0]),
-            ptr + BLS_ENCODED_FP_BYTES + 0x20,
-            hex_encode_u256(&y_words[1]),
-        );
-        self.code.borrow_mut().runtime_append(code);
+        self.emit_mstore_const(ptr, x_words[0]);
+        self.emit_mstore_const(ptr + 0x20, x_words[1]);
+        self.emit_mstore_const(ptr + BLS_ENCODED_FP_BYTES, y_words[0]);
+        self.emit_mstore_const(ptr + BLS_ENCODED_FP_BYTES + 0x20, y_words[1]);
         self.ec_point(Value::Memory(ptr))
     }
 
@@ -961,6 +1154,20 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     }
 
     fn sum_with_coeff_and_const(&self, values: &[(F, &Scalar)], constant: F) -> Scalar {
+        if self.codegen_mode == EvmCodegenMode::Compact {
+            let mut result = self.load_const(&constant);
+            for (coeff, value) in values {
+                assert_ne!(*coeff, F::ZERO);
+                let addend = if *coeff == F::ONE {
+                    (*value).clone()
+                } else {
+                    self.load_const(coeff) * *value
+                };
+                result += &addend;
+            }
+            return result;
+        }
+
         if values.is_empty() {
             return self.load_const(&constant);
         }
@@ -1010,6 +1217,20 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
         values: &[(F, &Scalar, &Scalar)],
         constant: F,
     ) -> Scalar {
+        if self.codegen_mode == EvmCodegenMode::Compact {
+            let mut result = self.load_const(&constant);
+            for (coeff, lhs, rhs) in values {
+                assert_ne!(*coeff, F::ZERO);
+                let product = if *coeff == F::ONE {
+                    (*lhs).clone() * *rhs
+                } else {
+                    self.load_const(coeff) * *lhs * *rhs
+                };
+                result += &product;
+            }
+            return result;
+        }
+
         if values.is_empty() {
             return self.load_const(&constant);
         }
@@ -1082,6 +1303,13 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
         let values = values.into_iter().collect_vec();
         let loader = &values.first().unwrap().loader;
+        if loader.codegen_mode == EvmCodegenMode::Compact {
+            values.into_iter().for_each(|value| {
+                *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
+            });
+            return;
+        }
+
         let products = iter::once(values[0].clone())
             .chain(
                 iter::repeat_with(|| loader.allocate(0x20))

@@ -106,9 +106,7 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
         .data(Bytes::from(calldata))
         .build_fill();
 
-    let result = evm
-        .transact_commit(call_tx)
-        .map_err(|err| format!("revm call error: {err}"))?;
+    let result = evm.transact_commit(call_tx).map_err(|err| format!("revm call error: {err}"))?;
     match result {
         ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
         ExecutionResult::Revert { gas_used, output } => {
@@ -122,4 +120,138 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
             reason
         )),
     }
+}
+
+/// Deploy page contracts, deploy compact verifier (with constructor args
+/// encoding page addresses and program word length), then call verifier.
+pub fn deploy_compact_and_call(
+    page_deployments: Vec<Vec<u8>>,
+    verifier_deployment_base: Vec<u8>,
+    program_words: usize,
+    calldata: Vec<u8>,
+) -> Result<u64, String> {
+    let mut evm = Context::mainnet()
+        .modify_cfg_chained(|cfg| {
+            cfg.spec = SpecId::PRAGUE;
+            // Allow oversized verifier contracts in local simulation.
+            cfg.limit_contract_code_size = Some(usize::MAX);
+            cfg.limit_contract_initcode_size = Some(usize::MAX);
+            cfg.disable_nonce_check = true;
+            // Disable Osaka tx gas cap (EIP-7825) in local simulation.
+            cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
+        })
+        .with_db(InMemoryDB::default())
+        .build_mainnet();
+
+    let mut page_addresses = Vec::with_capacity(page_deployments.len());
+    for deployment_code in page_deployments {
+        let deployment_tx = TxEnv::builder()
+            .gas_limit(BENCH_GAS_LIMIT)
+            .kind(TxKind::Create)
+            .data(Bytes::from(deployment_code))
+            .build_fill();
+
+        let result = evm
+            .transact_commit(deployment_tx)
+            .map_err(|err| format!("revm page deployment error: {err}"))?;
+        let page = match result {
+            ExecutionResult::Success { output: Output::Create(_, Some(contract)), .. } => contract,
+            ExecutionResult::Revert { gas_used, output } => {
+                let decoded = decode_revert_output(&output);
+                return Err(format!(
+                    "Compact page deployment reverts with gas_used {gas_used}; output={decoded}"
+                ));
+            }
+            ExecutionResult::Halt { reason, gas_used } => {
+                return Err(format!(
+                    "Compact page deployment halts with gas_used {gas_used} and reason {:?}",
+                    reason
+                ));
+            }
+            ExecutionResult::Success { output, .. } => {
+                return Err(format!(
+                    "Compact page deployment returned unexpected output: {output:?}"
+                ));
+            }
+        };
+        page_addresses.push(page);
+    }
+
+    let mut verifier_deployment = verifier_deployment_base;
+    verifier_deployment
+        .extend_from_slice(&encode_compact_constructor_args(&page_addresses, program_words));
+
+    let verifier_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Create)
+        .data(Bytes::from(verifier_deployment))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(verifier_tx)
+        .map_err(|err| format!("revm compact verifier deployment error: {err}"))?;
+    let verifier = match result {
+        ExecutionResult::Success { output: Output::Create(_, Some(contract)), .. } => contract,
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            return Err(format!(
+                "Compact verifier deployment reverts with gas_used {gas_used}; output={decoded}"
+            ));
+        }
+        ExecutionResult::Halt { reason, gas_used } => {
+            return Err(format!(
+                "Compact verifier deployment halts with gas_used {gas_used} and reason {:?}",
+                reason
+            ));
+        }
+        ExecutionResult::Success { output, .. } => {
+            return Err(format!(
+                "Compact verifier deployment returned unexpected output: {output:?}"
+            ));
+        }
+    };
+
+    let call_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Call(verifier))
+        .data(Bytes::from(calldata))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(call_tx)
+        .map_err(|err| format!("revm compact verifier call error: {err}"))?;
+    match result {
+        ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            Err(format!("Compact verifier call reverts with gas_used {gas_used}; output={decoded}"))
+        }
+        ExecutionResult::Halt { reason, gas_used } => Err(format!(
+            "Compact verifier call halts unexpectedly with gas_used {gas_used} and reason {:?}",
+            reason
+        )),
+    }
+}
+
+fn encode_compact_constructor_args(
+    page_addresses: &[revm::primitives::Address],
+    program_words: usize,
+) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(32 * (3 + page_addresses.len()));
+    encoded.extend_from_slice(&abi_word_from_usize(0x40));
+    encoded.extend_from_slice(&abi_word_from_usize(program_words));
+    encoded.extend_from_slice(&abi_word_from_usize(page_addresses.len()));
+    for address in page_addresses {
+        let mut word = [0u8; 32];
+        word[12..].copy_from_slice(address.as_slice());
+        encoded.extend_from_slice(&word);
+    }
+    encoded
+}
+
+fn abi_word_from_usize(value: usize) -> [u8; 32] {
+    let mut word = [0u8; 32];
+    let be = (value as u64).to_be_bytes();
+    word[24..].copy_from_slice(&be);
+    word
 }

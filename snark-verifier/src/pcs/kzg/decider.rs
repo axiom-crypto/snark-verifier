@@ -135,10 +135,7 @@ mod evm {
         padded[offset..].copy_from_slice(&be);
         let hi: [u8; 0x20] = padded[..0x20].try_into().unwrap();
         let lo: [u8; 0x20] = padded[0x20..].try_into().unwrap();
-        [
-            U256::from_be_bytes(hi),
-            U256::from_be_bytes(lo),
-        ]
+        [U256::from_be_bytes(hi), U256::from_be_bytes(lo)]
     }
 
     fn g2_to_words<C: CurveAffine>(ec_point: C) -> Vec<U256> {
@@ -155,19 +152,14 @@ mod evm {
         // EIP-2537 expects Fp2 coordinates in (c0, c1) order.
         // `to_repr()` for Fp2 in halo2curves is `c0 || c1` (little-endian bytes per component).
         // Keep this as default and allow an env override for compatibility testing.
-        let use_legacy_c1c0 = std::env::var("SNARK_VERIFIER_EVM_G2_LEGACY_C1C0")
-            .ok()
-            .as_deref()
-            == Some("1");
+        let use_legacy_c1c0 =
+            std::env::var("SNARK_VERIFIER_EVM_G2_LEGACY_C1C0").ok().as_deref() == Some("1");
         let components = if use_legacy_c1c0 {
             [&x[x_mid..], &x[..x_mid], &y[y_mid..], &y[..y_mid]]
         } else {
             [&x[..x_mid], &x[x_mid..], &y[..y_mid], &y[y_mid..]]
         };
-        components
-            .into_iter()
-            .flat_map(le_component_to_padded_words)
-            .collect()
+        components.into_iter().flat_map(le_component_to_padded_words).collect()
     }
 
     impl<M, MOS> AccumulationDecider<M::G1Affine, Rc<EvmLoader>> for KzgAs<M, MOS>
@@ -210,8 +202,7 @@ mod evm {
 
                 let hash_ptr = loader.keccak256(lhs[0].ptr(), lhs.len() * 0x80);
                 let challenge_ptr = loader.allocate(0x20);
-                let code = format!("mstore({challenge_ptr}, mod(mload({hash_ptr}), f_q))");
-                loader.code_mut().runtime_append(code);
+                loader.emit_mod_from_mem(challenge_ptr, hash_ptr);
                 let challenge = loader.scalar(Value::Memory(challenge_ptr));
 
                 let powers_of_challenge = LoadedScalar::<M::Fr>::powers(&challenge, lhs.len());
