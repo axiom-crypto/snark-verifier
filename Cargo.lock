@@ -3585,7 +3585,7 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "snark-verifier"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "ark-std 0.3.0",
  "crossterm 0.25.0",
@@ -3612,7 +3612,7 @@ dependencies = [
 
 [[package]]
 name = "snark-verifier-sdk"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "ark-std 0.3.0",
  "bincode",
