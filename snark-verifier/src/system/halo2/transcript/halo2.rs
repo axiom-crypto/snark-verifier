@@ -125,7 +125,7 @@ where
     }
 
     fn common_scalar(&mut self, scalar: &Scalar<C, EccChip>) -> Result<(), Error> {
-        self.buf.update(&[scalar.clone()]);
+        self.buf.update(std::slice::from_ref(scalar));
         Ok(())
     }
 

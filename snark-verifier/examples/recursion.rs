@@ -511,10 +511,12 @@ mod recursion {
 
             let accumulators = iter::empty()
                 .chain(succinct_verify(&app))
-                .chain((round > 0).then(|| succinct_verify(&previous)).unwrap_or_else(|| {
+                .chain(if round > 0 {
+                    succinct_verify(&previous)
+                } else {
                     let num_accumulator = 1 + previous.protocol.accumulator_indices.len();
                     vec![default_accumulator.clone(); num_accumulator]
-                }))
+                })
                 .collect_vec();
 
             let (accumulator, as_proof) = {

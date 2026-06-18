@@ -121,7 +121,7 @@ where
         &self,
         commitments: &[Msm<'a, C, L>],
         powers_of_v: &[L::LoadedScalar],
-    ) -> Msm<C, L>
+    ) -> Msm<'_, C, L>
     where
         T: LoadedScalar<C::Scalar>,
     {
@@ -138,7 +138,7 @@ where
     }
 }
 
-fn query_sets<S, T>(queries: &[Query<S, T>]) -> Vec<QuerySet<S, T>>
+fn query_sets<S, T>(queries: &[Query<S, T>]) -> Vec<QuerySet<'_, S, T>>
 where
     S: PartialEq + Copy,
     T: Clone + PartialEq,

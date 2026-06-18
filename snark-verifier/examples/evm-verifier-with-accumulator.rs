@@ -71,7 +71,9 @@ mod application {
             let [q_a, q_b, q_c, q_ab, constant] = [(); 5].map(|_| meta.fixed_column());
             let instance = meta.instance_column();
 
-            [a, b, c].map(|column| meta.enable_equality(column));
+            for column in [a, b, c] {
+                meta.enable_equality(column);
+            }
 
             meta.create_gate(
                 "q_a·a + q_b·b + q_c·c + q_ab·a·b + constant + instance = 0",

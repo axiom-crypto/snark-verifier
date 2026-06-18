@@ -192,7 +192,7 @@ where
                     u,
                     iter::empty()
                         .chain([b, a])
-                        .chain(iter::repeat_n(C::Scalar::ZERO, pk.domain.n - 2))
+                        .chain(iter::repeat(C::Scalar::ZERO).take(pk.domain.n - 2))
                         .collect(),
                 )
             }))

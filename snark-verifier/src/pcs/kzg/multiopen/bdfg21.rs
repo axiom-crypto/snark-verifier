@@ -106,7 +106,9 @@ where
     }
 }
 
-fn query_sets<S: PartialEq + Ord + Copy, T: Clone>(queries: &[Query<S, T>]) -> Vec<QuerySet<S, T>> {
+fn query_sets<S: PartialEq + Ord + Copy, T: Clone>(
+    queries: &[Query<S, T>],
+) -> Vec<QuerySet<'_, S, T>> {
     let poly_shifts =
         queries.iter().fold(Vec::<(usize, Vec<_>, Vec<&T>)>::new(), |mut poly_shifts, query| {
             if let Some(pos) = poly_shifts.iter().position(|(poly, _, _)| *poly == query.poly) {
@@ -206,7 +208,7 @@ impl<'a, S, T> QuerySet<'a, S, T> {
         coeff: &QuerySetCoeff<C::Scalar, T>,
         commitments: &[Msm<'a, C, L>],
         powers_of_mu: &[T],
-    ) -> Msm<C, L>
+    ) -> Msm<'_, C, L>
     where
         T: LoadedScalar<C::Scalar>,
     {
@@ -268,7 +270,7 @@ where
                     .iter()
                     .enumerate()
                     .filter(|&(i, _)| i != j)
-                    .map(|(_, shift_i)| (shift_j.1.clone() - &shift_i.1))
+                    .map(|(_, shift_i)| shift_j.1.clone() - &shift_i.1)
                     .reduce(|acc, value| acc * value)
                     .unwrap_or_else(|| loader.load_const(&F::ONE))
             })

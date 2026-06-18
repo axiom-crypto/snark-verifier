@@ -55,17 +55,17 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> Halo2Loader<C, EccChip> {
     }
 
     /// Returns reference of [`EccInstructions`].
-    pub fn ecc_chip(&self) -> Ref<EccChip> {
+    pub fn ecc_chip(&self) -> Ref<'_, EccChip> {
         self.ecc_chip.borrow()
     }
 
     /// Returns reference of [`EccInstructions::ScalarChip`].
-    pub fn scalar_chip(&self) -> Ref<EccChip::ScalarChip> {
+    pub fn scalar_chip(&self) -> Ref<'_, EccChip::ScalarChip> {
         Ref::map(self.ecc_chip(), |ecc_chip| ecc_chip.scalar_chip())
     }
 
     /// Returns reference of [`EccInstructions::Context`].
-    pub fn ctx(&self) -> Ref<EccChip::Context> {
+    pub fn ctx(&self) -> Ref<'_, EccChip::Context> {
         self.ctx.borrow()
     }
 
@@ -278,14 +278,14 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> Scalar<C, EccChip> {
     }
 
     /// Returns reference of [`EccInstructions::AssignedScalar`].
-    pub fn assigned(&self) -> Ref<EccChip::AssignedScalar> {
+    pub fn assigned(&self) -> Ref<'_, EccChip::AssignedScalar> {
         if let Some(constant) = self.maybe_const() {
             *self.value.borrow_mut() = Value::Assigned(self.loader.assign_const_scalar(constant))
         }
         Ref::map(self.value.borrow(), Value::assigned)
     }
 
-    fn value(&self) -> Ref<Value<C::Scalar, EccChip::AssignedScalar>> {
+    fn value(&self) -> Ref<'_, Value<C::Scalar, EccChip::AssignedScalar>> {
         self.value.borrow()
     }
 
@@ -438,14 +438,14 @@ impl<C: CurveAffine, EccChip: EccInstructions<C>> EcPoint<C, EccChip> {
     }
 
     /// Returns reference of [`EccInstructions::AssignedEcPoint`].
-    pub fn assigned(&self) -> Ref<EccChip::AssignedEcPoint> {
+    pub fn assigned(&self) -> Ref<'_, EccChip::AssignedEcPoint> {
         if let Some(constant) = self.maybe_const() {
             *self.value.borrow_mut() = Value::Assigned(self.loader.assign_const_ec_point(constant))
         }
         Ref::map(self.value.borrow(), Value::assigned)
     }
 
-    fn value(&self) -> Ref<Value<C, EccChip::AssignedEcPoint>> {
+    fn value(&self) -> Ref<'_, Value<C, EccChip::AssignedEcPoint>> {
         self.value.borrow()
     }
 
