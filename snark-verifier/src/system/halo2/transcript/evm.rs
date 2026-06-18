@@ -188,9 +188,9 @@ where
                 Error::Transcript(io::ErrorKind::Other, "Invalid elliptic curve point".to_string())
             })?;
 
-        [coordinates.x(), coordinates.y()].map(|coordinate| {
+        for coordinate in [coordinates.x(), coordinates.y()] {
             self.buf.extend(coordinate.to_repr().as_ref().iter().rev().cloned());
-        });
+        }
 
         Ok(())
     }

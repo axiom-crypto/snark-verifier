@@ -157,7 +157,7 @@ where
     }
 }
 
-fn query_sets<S, T>(queries: &[Query<S, T>]) -> Vec<QuerySet<S, T>>
+fn query_sets<S, T>(queries: &[Query<S, T>]) -> Vec<QuerySet<'_, S, T>>
 where
     S: PartialEq + Ord + Copy,
     T: Clone,
@@ -250,7 +250,7 @@ impl<'a, S, T> QuerySet<'a, S, T> {
         commitments: &[Msm<'a, C, L>],
         q_eval: &T,
         powers_of_x_1: &[T],
-    ) -> Msm<C, L>
+    ) -> Msm<'_, C, L>
     where
         T: LoadedScalar<C::Scalar>,
     {
@@ -323,7 +323,7 @@ where
                     .iter()
                     .enumerate()
                     .filter(|&(i, _)| i != j)
-                    .map(|(_, shift_i)| (shift_j.1.clone() - &shift_i.1))
+                    .map(|(_, shift_i)| shift_j.1.clone() - &shift_i.1)
                     .reduce(|acc, value| acc * value)
                     .unwrap_or_else(|| loader.load_const(&F::ONE))
             })

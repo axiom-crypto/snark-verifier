@@ -22,11 +22,11 @@ pairing = { version = "0.23" }
 
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 # halo2-base = { version = "=0.4.1", default-features = false }
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.2", default-features = false }
 
 # loader_halo2
 # halo2-ecc = { version = "=0.4.1", default-features = false, optional = true }
-halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false, optional = true }
+halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.2", default-features = false, optional = true }
 
 # parallel
 rayon = { version = "1.10", optional = true }
@@ -60,6 +60,7 @@ parallel = ["dep:rayon"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["halo2-base/halo2-pse", "halo2-ecc?/halo2-pse"]
 halo2-axiom = ["halo2-base/halo2-axiom", "halo2-ecc?/halo2-axiom"]
+cuda = ["halo2-base/cuda", "halo2-ecc?/cuda"]
 
 [[example]]
 name = "evm-verifier"

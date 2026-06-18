@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # `ark-relations` pulls in `tracing-subscriber 0.2.25`, but this is an
+    # optional dependency path from the lockfile rather than a used runtime path.
+    "RUSTSEC-2025-0055",
+]
