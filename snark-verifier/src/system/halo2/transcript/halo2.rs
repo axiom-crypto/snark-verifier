@@ -162,8 +162,15 @@ where
     fn read_scalar(&mut self) -> Result<Scalar<C, EccChip>, Error> {
         let scalar = {
             let mut data = <C::Scalar as PrimeField>::Repr::default();
-            self.stream.read_exact(data.as_mut()).unwrap();
-            C::Scalar::from_repr(data).unwrap()
+            self.stream
+                .read_exact(data.as_mut())
+                .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+            C::Scalar::from_repr_vartime(data).ok_or_else(|| {
+                Error::Transcript(
+                    io::ErrorKind::Other,
+                    "Invalid scalar encoding in proof".to_string(),
+                )
+            })?
         };
         let scalar = self.loader.assign_scalar(scalar);
         self.loaded_stream.push(TranscriptObject::Scalar(scalar.clone()));
@@ -174,8 +181,15 @@ where
     fn read_ec_point(&mut self) -> Result<EcPoint<C, EccChip>, Error> {
         let ec_point = {
             let mut compressed = C::Repr::default();
-            self.stream.read_exact(compressed.as_mut()).unwrap();
-            C::from_bytes(&compressed).unwrap()
+            self.stream
+                .read_exact(compressed.as_mut())
+                .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+            Option::<C>::from(C::from_bytes(&compressed)).ok_or_else(|| {
+                Error::Transcript(
+                    io::ErrorKind::Other,
+                    "Invalid elliptic curve point encoding in proof".to_string(),
+                )
+            })?
         };
         let ec_point = self.loader.assign_ec_point(ec_point);
         self.loaded_stream.push(TranscriptObject::EcPoint(ec_point.clone()));
