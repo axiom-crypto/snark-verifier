@@ -40,12 +40,37 @@ mod native {
             kzg::{KzgAccumulator, LimbsEncoding},
             AccumulatorEncoding,
         },
-        util::{
-            arithmetic::{fe_from_limbs, CurveAffine},
-            Itertools,
-        },
+        util::arithmetic::{fe_from_limbs, fe_to_big, modulus, CurveAffine, PrimeField},
         Error,
     };
+    use num_bigint::BigUint;
+
+    fn fe_from_limbs_checked<F1, F2, const LIMBS: usize, const BITS: usize>(
+        limbs: &[&F1],
+    ) -> Result<F2, Error>
+    where
+        F1: PrimeField,
+        F2: PrimeField,
+    {
+        if limbs.len() != LIMBS {
+            return Err(Error::InvalidInstances);
+        }
+
+        let limb_bound = BigUint::from(1usize) << BITS;
+        let mut value = BigUint::default();
+        for (idx, limb) in limbs.iter().enumerate() {
+            let limb = fe_to_big(**limb);
+            if limb >= limb_bound {
+                return Err(Error::InvalidInstances);
+            }
+            value += limb << (idx * BITS);
+        }
+        if value >= modulus::<F2>() {
+            return Err(Error::InvalidInstances);
+        }
+
+        Ok(fe_from_limbs::<F1, F2, LIMBS, BITS>(std::array::from_fn(|idx| *limbs[idx])))
+    }
 
     impl<C, const LIMBS: usize, const BITS: usize> AccumulatorEncoding<C, NativeLoader>
         for LimbsEncoding<LIMBS, BITS>
@@ -55,21 +80,19 @@ mod native {
         type Accumulator = KzgAccumulator<C, NativeLoader>;
 
         fn from_repr(limbs: &[&C::Scalar]) -> Result<Self::Accumulator, Error> {
-            assert_eq!(limbs.len(), 4 * LIMBS);
+            if limbs.len() != 4 * LIMBS {
+                return Err(Error::InvalidInstances);
+            }
 
             let [lhs_x, lhs_y, rhs_x, rhs_y]: [_; 4] = limbs
                 .chunks(LIMBS)
-                .map(|limbs| {
-                    fe_from_limbs::<_, _, LIMBS, BITS>(
-                        limbs.iter().map(|limb| **limb).collect_vec().try_into().unwrap(),
-                    )
-                })
-                .collect_vec()
+                .map(fe_from_limbs_checked::<C::Scalar, C::Base, LIMBS, BITS>)
+                .collect::<Result<Vec<_>, _>>()?
                 .try_into()
-                .unwrap();
+                .map_err(|_| Error::InvalidInstances)?;
             let accumulator = KzgAccumulator::new(
-                C::from_xy(lhs_x, lhs_y).unwrap(),
-                C::from_xy(rhs_x, rhs_y).unwrap(),
+                Option::from(C::from_xy(lhs_x, lhs_y)).ok_or(Error::InvalidInstances)?,
+                Option::from(C::from_xy(rhs_x, rhs_y)).ok_or(Error::InvalidInstances)?,
             );
 
             Ok(accumulator)
@@ -102,7 +125,9 @@ mod evm {
         type Accumulator = KzgAccumulator<C, Rc<EvmLoader>>;
 
         fn from_repr(limbs: &[&Scalar]) -> Result<Self::Accumulator, Error> {
-            assert_eq!(limbs.len(), 4 * LIMBS);
+            if limbs.len() != 4 * LIMBS {
+                return Err(Error::InvalidInstances);
+            }
 
             let loader = limbs[0].loader();
 

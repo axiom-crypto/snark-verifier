@@ -64,6 +64,16 @@ fn hex_encode_u256(value: &U256) -> String {
     format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
 }
 
+fn limb_bound_check_code(limb: &str, shift: usize, bits: usize) -> String {
+    let remaining_bits = 256usize.saturating_sub(shift);
+    let bound_bits = bits.min(remaining_bits);
+    if bound_bits == 0 {
+        format!("success := and(iszero({limb}), success)\n")
+    } else {
+        format!("success := and(lt({limb}, shl({bound_bits}, 1)), success)\n")
+    }
+}
+
 impl EvmLoader {
     /// Initialize a [`EvmLoader`] with base and scalar field.
     pub fn new<Base, Scalar>() -> Rc<Self>
@@ -176,11 +186,13 @@ impl EvmLoader {
         x_limbs: [&Scalar; LIMBS],
         y_limbs: [&Scalar; LIMBS],
     ) -> EcPoint {
+        assert!(BITS > 0, "limb width must be positive");
         let ptr = self.allocate(0x40);
         let mut code = String::new();
         for (idx, limb) in x_limbs.iter().enumerate() {
             let limb_i = self.push(limb);
             let shift = idx * BITS;
+            code.push_str(&limb_bound_check_code(&limb_i, shift, BITS));
             if idx == 0 {
                 code.push_str(format!("let x := {limb_i}\n").as_str());
             } else {
@@ -192,6 +204,7 @@ impl EvmLoader {
         for (idx, limb) in y_limbs.iter().enumerate() {
             let limb_i = self.push(limb);
             let shift = idx * BITS;
+            code.push_str(&limb_bound_check_code(&limb_i, shift, BITS));
             if idx == 0 {
                 code.push_str(format!("let y := {limb_i}\n").as_str());
             } else {
