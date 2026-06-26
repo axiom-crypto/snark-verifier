@@ -1681,8 +1681,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-base"
-version = "0.5.2"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.2#b4031ae0adb7cb37650ebd85c40631d8fca44237"
+version = "0.5.3"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.3#c54cbac60da598e8e484b8aea858e0bf3c51a857"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1704,8 +1704,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-ecc"
-version = "0.5.2"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.2#b4031ae0adb7cb37650ebd85c40631d8fca44237"
+version = "0.5.3"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.3#c54cbac60da598e8e484b8aea858e0bf3c51a857"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
