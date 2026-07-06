@@ -4,7 +4,8 @@ use getset::Getters;
 use halo2_base::{
     gates::{
         circuit::{
-            builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig, CircuitBuilderStage,
+            builder::{BaseCircuitBuilder, WitnessCircuitBuilder},
+            BaseCircuitParams, BaseConfig, CircuitBuilderStage,
         },
         flex_gate::{threads::SinglePhaseCoreManager, MultiPhaseThreadBreakPoints},
         RangeChip,
@@ -568,6 +569,23 @@ impl AggregationCircuit {
 }
 
 impl<F: ScalarField> CircuitExt<F> for BaseCircuitBuilder<F> {
+    fn num_instance(&self) -> Vec<usize> {
+        self.assigned_instances.iter().map(|instances| instances.len()).collect()
+    }
+
+    fn instances(&self) -> Vec<Vec<F>> {
+        self.assigned_instances
+            .iter()
+            .map(|instances| instances.iter().map(|v| *v.value()).collect())
+            .collect()
+    }
+
+    fn selectors(config: &Self::Config) -> Vec<Selector> {
+        config.gate().basic_gates[0].iter().map(|gate| gate.q_enable).collect()
+    }
+}
+
+impl<F: ScalarField> CircuitExt<F> for WitnessCircuitBuilder<F> {
     fn num_instance(&self) -> Vec<usize> {
         self.assigned_instances.iter().map(|instances| instances.len()).collect()
     }
