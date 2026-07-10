@@ -7,7 +7,7 @@ edition = "2021"
 repository = "https://github.com/axiom-crypto/snark-verifier"
 readme = "../README.md"
 description = "SDK for using snark-verifier."
-rust-version = "1.73.0"
+rust-version = "1.91.1"
 autobenches = false
 
 [dependencies]

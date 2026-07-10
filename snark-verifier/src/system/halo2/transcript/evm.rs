@@ -352,12 +352,8 @@ where
 {
     fn write_point(&mut self, ec_point: C) -> io::Result<()> {
         halo2_proofs::transcript::Transcript::<C, ChallengeEvm<C>>::common_point(self, ec_point)?;
-        let coords: Coordinates<C> = Option::from(ec_point.coordinates()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "Cannot write points at infinity to the transcript",
-            )
-        })?;
+        let coords: Coordinates<C> = Option::from(ec_point.coordinates())
+            .ok_or_else(|| io::Error::other("Cannot write points at infinity to the transcript"))?;
         let mut x = coords.x().to_repr();
         let mut y = coords.y().to_repr();
         x.as_mut().reverse();

@@ -244,7 +244,7 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
     }
 
     fn num_instance(&self) -> Vec<usize> {
-        iter::repeat(self.num_instance.clone()).take(self.num_proof).flatten().collect()
+        iter::repeat_n(self.num_instance.clone(), self.num_proof).flatten().collect()
     }
 
     fn num_witness(&self) -> Vec<usize> {

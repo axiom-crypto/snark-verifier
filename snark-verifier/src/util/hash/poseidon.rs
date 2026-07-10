@@ -153,7 +153,7 @@ impl<F: PrimeField, L: LoadedScalar<F>, const T: usize, const RATE: usize> Posei
     /// state.
     pub fn squeeze(&mut self) -> L {
         let buf = mem::take(&mut self.buf);
-        let exact = buf.len() % RATE == 0;
+        let exact = buf.len().is_multiple_of(RATE);
 
         for chunk in buf.chunks(RATE) {
             self.permutation(chunk);

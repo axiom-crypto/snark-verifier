@@ -7,7 +7,7 @@ edition = "2021"
 repository = "https://github.com/axiom-crypto/snark-verifier"
 readme = "../README.md"
 description = "Generic (S)NARK verifier for Rust, halo2, and EVM. This is a fork of PSE's version."
-rust-version = "1.73.0"
+rust-version = "1.91.1"
 
 [dependencies]
 itertools = "0.11"
