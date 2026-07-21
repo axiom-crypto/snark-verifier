@@ -2,18 +2,16 @@ use super::{read_instances, write_instances, CircuitExt, PlonkSuccinctVerifier, 
 #[cfg(feature = "display")]
 use ark_std::{end_timer, start_timer};
 pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
+#[cfg(feature = "cuda")]
 use halo2_base::{
-    gates::circuit::builder::WitnessCircuitBuilder,
+    gates::circuit::builder::BaseCircuitBuilder,
     halo2_proofs::{
-        self,
         cuda::DeviceBuffer,
-        plonk::{
-            create_proof_materialized, materialize_witness, synthesize_witness, AdviceSingle,
-            InstanceSingle,
-        },
+        plonk::{create_proof_raw, synthesize_witness, AdviceSingle, InstanceSingle},
     },
 };
-use halo2_proofs::{
+
+use halo2_base::halo2_proofs::{
     circuit::Layouter,
     halo2curves::{
         bn256::{Bn256, Fr, G1Affine},
@@ -54,8 +52,6 @@ use std::{
     marker::PhantomData,
     path::Path,
 };
-
-use tracing::info_span;
 
 pub mod aggregation;
 pub mod utils;
@@ -265,12 +261,11 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
     gen_snark::<ConcreteCircuit, ProverSHPLONK<_>, VerifierSHPLONK<_>>(params, pk, circuit, path)
 }
 
-/// Diagnostic passthrough for
-/// [`halo2_proofs::plonk::synthesize_witness`] — runs `Circuit::synthesize` on the
-/// inputs (same as [`create_proof`] does) and returns the phase-1 tuple.
-///
-/// Uses SHPLONK / Poseidon transcript to match [`gen_snark`]'s prover config so
-/// this output is directly comparable to what a real proof would use.
+/// Diagnostic: runs the phase-1 synthesis half of `create_proof` and returns the
+/// instance/advice singles for comparison against an externally generated witness.
+/// The rng is seeded deterministically and the transcript state is discarded, so the
+/// output is not usable for proving.
+#[cfg(feature = "cuda")]
 pub fn synthesize_witness_shplonk<ConcreteCircuit: Circuit<Fr>>(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
@@ -292,53 +287,14 @@ pub fn synthesize_witness_shplonk<ConcreteCircuit: Circuit<Fr>>(
     .expect("synthesize_witness failed")
 }
 
-/// Diagnostic passthrough for
-/// [`halo2_proofs::plonk::materialize_witness`] — runs the flat-advice
-/// materialization path (same as [`create_proof_materialized`] does) and returns
-/// the phase-1 tuple.
+/// Generates a SHPLONK snark from pre-synthesized, device-resident advice columns
+/// (e.g. from an out-of-band witness generator), skipping `Circuit::synthesize`.
 ///
-/// Consumes the `WitnessCircuitBuilder` for its flat advice + instances, matching
-/// [`gen_snark_from_witness`]'s inputs.
-pub fn materialize_witness_shplonk(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: WitnessCircuitBuilder<Fr>,
-) -> (InstanceSingle<G1Affine>, AdviceSingle<G1Affine>, Vec<Fr>) {
-    let instances_owned = circuit.instances();
-    let instances: Vec<&[Fr]> = instances_owned.iter().map(Vec::as_slice).collect_vec();
-    let advice = circuit.main.get_gpu_advice();
-
-    let mut transcript =
-        PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(vec![], POSEIDON_SPEC.clone());
-    let rng = StdRng::seed_from_u64(0);
-
-    materialize_witness::<_, ProverSHPLONK<_>, _, _, _>(
-        params,
-        pk,
-        &instances,
-        advice,
-        rng,
-        &mut transcript,
-    )
-    .expect("materialize_witness failed")
-}
-
-pub fn gen_snark_from_witness(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    circuit: WitnessCircuitBuilder<Fr>,
-) -> Snark {
-    let instances_owned = circuit.instances();
-    let gpu_advice_values = circuit.main.get_gpu_advice();
-    gen_snark_from_base(params, pk, gpu_advice_values, instances_owned)
-}
-
-/// Generates a SHPLONK snark directly from per-column device advice buffers and instance
-/// column values.
-///
-/// `gpu_advice_values[i]` is physical advice column `i`, already materialized in the
-/// post-break-point, post-lookup layout that [`create_proof_materialized`] expects (one
-/// buffer of `2^k` evaluated field elements per column).
+/// The caller must supply one `DeviceBuffer` per advice column of `pk`'s constraint
+/// system, each of size `params.n()`, laid out exactly as `BaseCircuitBuilder`
+/// synthesis would produce (blinding rows may be left zero; `create_proof_raw`
+/// overwrites them). Panics on proving or verification failure.
+#[cfg(feature = "cuda")]
 pub fn gen_snark_from_base(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
@@ -350,7 +306,7 @@ pub fn gen_snark_from_base(
         pk.get_vk(),
         Config::kzg()
             .with_num_instance(instances_owned.iter().map(Vec::len).collect_vec())
-            .with_accumulator_indices(WitnessCircuitBuilder::<Fr>::accumulator_indices()),
+            .with_accumulator_indices(BaseCircuitBuilder::<Fr>::accumulator_indices()),
     );
 
     let instances = instances_owned.iter().map(Vec::as_slice).collect_vec();
@@ -359,7 +315,7 @@ pub fn gen_snark_from_base(
         PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(vec![], POSEIDON_SPEC.clone());
     let mut rng = StdRng::from_entropy();
 
-    create_proof_materialized::<_, ProverSHPLONK<_>, _, _, _>(
+    create_proof_raw::<_, ProverSHPLONK<_>, _, _, _>(
         params,
         pk,
         &instances,
@@ -370,31 +326,27 @@ pub fn gen_snark_from_base(
     .unwrap();
     let proof = transcript.finalize();
 
-    info_span!("assert_verify_snark").in_scope(|| {
-        // validate proof before caching
-        assert!(
-            {
-                let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(
-                    &proof[..],
-                    POSEIDON_SPEC.clone(),
-                );
-                VerificationStrategy::<_, VerifierSHPLONK<_>>::finalize(
-                    verify_proof::<_, VerifierSHPLONK<_>, _, _, _>(
-                        params.verifier_params(),
-                        pk.get_vk(),
-                        AccumulatorStrategy::new(params.verifier_params()),
-                        &[instances.as_slice()],
-                        &mut transcript_read,
-                    )
-                    .unwrap(),
+    assert!(
+        {
+            let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(
+                &proof[..],
+                POSEIDON_SPEC.clone(),
+            );
+            VerificationStrategy::<_, VerifierSHPLONK<_>>::finalize(
+                verify_proof::<_, VerifierSHPLONK<_>, _, _, _>(
+                    params.verifier_params(),
+                    pk.get_vk(),
+                    AccumulatorStrategy::new(params.verifier_params()),
+                    &[instances.as_slice()],
+                    &mut transcript_read,
                 )
-            },
-            "SNARK proof failed to verify"
-        );
-    });
+                .unwrap(),
+            )
+        },
+        "SNARK proof failed to verify"
+    );
 
-    let snark = Snark::new(protocol, instances_owned, proof);
-    snark
+    Snark::new(protocol, instances_owned, proof)
 }
 
 /// Tries to deserialize a SNARK from the specified `path` using `bincode`.
