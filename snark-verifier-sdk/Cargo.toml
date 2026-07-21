@@ -52,7 +52,7 @@ loader_halo2 = ["snark-verifier/loader_halo2"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 revm = ["snark-verifier/revm"]
 parallel = ["snark-verifier/parallel"]
-cuda = ["snark-verifier/cuda"]
+cuda = ["snark-verifier/cuda", "halo2-base/cuda"]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
