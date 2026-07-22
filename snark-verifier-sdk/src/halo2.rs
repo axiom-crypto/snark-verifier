@@ -3,7 +3,7 @@ use super::{read_instances, write_instances, CircuitExt, PlonkSuccinctVerifier, 
 use ark_std::{end_timer, start_timer};
 pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
 use halo2_base::{
-    gates::circuit::builder::BaseCircuitBuilder, halo2_proofs::plonk::create_proof_raw,
+    gates::circuit::builder::BaseCircuitBuilder, halo2_proofs::plonk::create_proof_from_advice,
 };
 
 use halo2_base::halo2_proofs::{
@@ -314,7 +314,7 @@ pub fn gen_snark_from_base(
         PoseidonTranscript::<NativeLoader, Vec<u8>>::from_spec(vec![], POSEIDON_SPEC.clone());
     let mut rng = StdRng::from_entropy();
 
-    create_proof_raw::<_, ProverSHPLONK<_>, _, _, _>(
+    create_proof_from_advice::<_, ProverSHPLONK<_>, _, _, _>(
         params,
         pk,
         &instances,
