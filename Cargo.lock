@@ -1528,8 +1528,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-axiom"
-version = "0.5.2"
-source = "git+https://github.com/axiom-crypto/halo2.git?tag=v0.5.2#1eed471495b64ec1edf22f0661bbc65d0e4381d5"
+version = "0.5.3"
+source = "git+https://github.com/axiom-crypto/halo2.git?branch=main#5e4f0e524956f23b50d51b3a2f7bb07834948598"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1550,7 +1550,7 @@ dependencies = [
 [[package]]
 name = "halo2-axiom-gpu"
 version = "1.0.0"
-source = "git+https://github.com/axiom-crypto/halo2-gpu.git?tag=v1.0.0#97ef2d02aa3348fc04b520c3c2562a9c13b57126"
+source = "git+https://github.com/axiom-crypto/halo2-gpu.git?branch=main#9ebf6979dd439b3b117273aa0704262caf041b93"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1590,7 +1590,7 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.5.4"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.4#a69fdee77f41bdd48ad658b69673dea5a0815db4"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#b90c962a5e3bcfb01d1ce06466e5de08261b5c4e"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.5.4"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.4#a69fdee77f41bdd48ad658b69673dea5a0815db4"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#b90c962a5e3bcfb01d1ce06466e5de08261b5c4e"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -1630,9 +1630,9 @@ dependencies = [
 
 [[package]]
 name = "halo2curves-axiom"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8309e4638b4f1bcf6613d72265a84074d26034c35edc5d605b5688e580b8b8"
+checksum = "276d6c463e0e8e70c1a221baae62b670453f6ef851dd1c73f0764e5215fda64d"
 dependencies = [
  "blake2b_simd",
  "digest 0.10.7",
@@ -2213,7 +2213,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "openvm-cuda-builder"
 version = "2.0.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?tag=v2.0.0#16d60de724c21dcadfde7d8315a1db507e5832d7"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#be2b6983cbd70976b37acbb72ceb1b3593dc67ae"
 dependencies = [
  "cc",
  "glob",
@@ -2222,7 +2222,7 @@ dependencies = [
 [[package]]
 name = "openvm-cuda-common"
 version = "2.0.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?tag=v2.0.0#16d60de724c21dcadfde7d8315a1db507e5832d7"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#be2b6983cbd70976b37acbb72ceb1b3593dc67ae"
 dependencies = [
  "bytesize",
  "ctor",
