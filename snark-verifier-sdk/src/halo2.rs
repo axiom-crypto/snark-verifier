@@ -3,28 +3,27 @@ use super::{read_instances, write_instances, CircuitExt, PlonkSuccinctVerifier, 
 use ark_std::{end_timer, start_timer};
 pub use halo2_base::poseidon::hasher::spec::OptimizedPoseidonSpec;
 use halo2_base::{
-    gates::circuit::builder::BaseCircuitBuilder, halo2_proofs::plonk::create_proof_from_advice,
-};
-
-use halo2_base::halo2_proofs::{
-    circuit::Layouter,
-    halo2curves::{
-        bn256::{Bn256, Fr, G1Affine},
-        group::ff::Field,
-    },
-    plonk::{
-        create_proof, keygen_vk, verify_proof, Circuit, ConstraintSystem, Error, ProvingKey,
-        VerifyingKey,
-    },
-    poly::{
-        commitment::{ParamsProver, Prover, Verifier},
-        kzg::{
-            commitment::{KZGCommitmentScheme, ParamsKZG},
-            msm::DualMSM,
-            multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
-            strategy::{AccumulatorStrategy, GuardKZG},
+    gates::circuit::builder::BaseCircuitBuilder,
+    halo2_proofs::{
+        circuit::Layouter,
+        halo2curves::{
+            bn256::{Bn256, Fr, G1Affine},
+            group::ff::Field,
         },
-        VerificationStrategy,
+        plonk::{
+            create_proof, create_proof_from_advice, keygen_vk, verify_proof, Circuit,
+            ConstraintSystem, Error, ProvingKey, VerifyingKey,
+        },
+        poly::{
+            commitment::{ParamsProver, Prover, Verifier},
+            kzg::{
+                commitment::{KZGCommitmentScheme, ParamsKZG},
+                msm::DualMSM,
+                multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
+                strategy::{AccumulatorStrategy, GuardKZG},
+            },
+            VerificationStrategy,
+        },
     },
 };
 
@@ -260,8 +259,10 @@ pub fn gen_snark_shplonk<ConcreteCircuit: CircuitExt<Fr>>(
     gen_snark::<ConcreteCircuit, ProverSHPLONK<_>, VerifierSHPLONK<_>>(params, pk, circuit, path)
 }
 
-/// Diagnostic: runs the phase-1 synthesis half of `create_proof` and returns the
-/// instance/advice singles for comparison against an externally generated witness.
+/// Runs the phase-1 synthesis half of `create_proof` and returns the instance/advice
+/// singles for comparison against an externally generated witness. Used by tests in
+/// `openvm-static-verifier` to validate advice column layouts.
+///
 /// The rng is seeded deterministically and the transcript state is discarded, so the
 /// output is not usable for proving.
 pub fn synthesize_witness_shplonk<ConcreteCircuit: Circuit<Fr>>(
@@ -325,7 +326,7 @@ pub fn gen_snark_from_base(
     .unwrap();
     let proof = transcript.finalize();
 
-    assert!(
+    debug_assert!(
         {
             let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::from_spec(
                 &proof[..],
