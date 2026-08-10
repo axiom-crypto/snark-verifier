@@ -1549,8 +1549,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-axiom-gpu"
-version = "1.0.0"
-source = "git+https://github.com/axiom-crypto/halo2-gpu.git?branch=main#9ebf6979dd439b3b117273aa0704262caf041b93"
+version = "1.0.1"
+source = "git+https://github.com/axiom-crypto/halo2-gpu.git?branch=main#bd1d5cd9494d2c73ca895b9927db730bed6246ed"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1589,8 +1589,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-base"
-version = "0.5.4"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#b90c962a5e3bcfb01d1ce06466e5de08261b5c4e"
+version = "0.5.5"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#4d3bceaf235178d1daf63da2c936acf3165c997c"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1611,8 +1611,8 @@ dependencies = [
 
 [[package]]
 name = "halo2-ecc"
-version = "0.5.4"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#b90c962a5e3bcfb01d1ce06466e5de08261b5c4e"
+version = "0.5.5"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#4d3bceaf235178d1daf63da2c936acf3165c997c"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -2212,8 +2212,8 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openvm-cuda-builder"
-version = "2.0.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#be2b6983cbd70976b37acbb72ceb1b3593dc67ae"
+version = "2.0.1"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#362c7ad8c6b042b320471a137e3eadec7ec69a44"
 dependencies = [
  "cc",
  "glob",
@@ -2221,8 +2221,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-cuda-common"
-version = "2.0.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#be2b6983cbd70976b37acbb72ceb1b3593dc67ae"
+version = "2.0.1"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#362c7ad8c6b042b320471a137e3eadec7ec69a44"
 dependencies = [
  "bytesize",
  "ctor",
@@ -3350,7 +3350,7 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "snark-verifier"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ark-std 0.3.0",
  "crossterm 0.25.0",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "snark-verifier-sdk"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ark-std 0.3.0",
  "bincode",
