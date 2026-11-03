@@ -1529,7 +1529,7 @@ dependencies = [
 [[package]]
 name = "halo2-axiom"
 version = "0.5.3"
-source = "git+https://github.com/axiom-crypto/halo2.git?branch=main#5e4f0e524956f23b50d51b3a2f7bb07834948598"
+source = "git+https://github.com/axiom-crypto/halo2.git?tag=v0.5.3#5e4f0e524956f23b50d51b3a2f7bb07834948598"
 dependencies = [
  "blake2b_simd",
  "crossbeam",
@@ -1550,7 +1550,7 @@ dependencies = [
 [[package]]
 name = "halo2-axiom-gpu"
 version = "1.0.2"
-source = "git+https://github.com/axiom-crypto/halo2-gpu.git?branch=main#30f8ef5563ab1b040bb84a1bee28ef259f6d70f0"
+source = "git+https://github.com/axiom-crypto/halo2-gpu.git?tag=v1.0.2#3fa910d223ce015b12e0812d95748a714a39280b"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1590,7 +1590,7 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.5.6"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#19ac567783cb3f55d34d32febba812bc9e50e9a5"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.6#2c34386aeb96ee03a7073565af6997356492bed3"
 dependencies = [
  "getset",
  "halo2-axiom",
@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.5.6"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=main#19ac567783cb3f55d34d32febba812bc9e50e9a5"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?tag=v0.5.6#2c34386aeb96ee03a7073565af6997356492bed3"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -2213,7 +2213,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "openvm-cuda-builder"
 version = "2.1.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#a6b4761ad9a098f3a166740d22ad60b96400cd65"
+source = "git+https://github.com/openvm-org/stark-backend.git?tag=v2.1.0#a6b4761ad9a098f3a166740d22ad60b96400cd65"
 dependencies = [
  "cc",
  "glob",
@@ -2222,7 +2222,7 @@ dependencies = [
 [[package]]
 name = "openvm-cuda-common"
 version = "2.1.0"
-source = "git+https://github.com/openvm-org/stark-backend.git?branch=main#a6b4761ad9a098f3a166740d22ad60b96400cd65"
+source = "git+https://github.com/openvm-org/stark-backend.git?tag=v2.1.0#a6b4761ad9a098f3a166740d22ad60b96400cd65"
 dependencies = [
  "bytesize",
  "ctor",
