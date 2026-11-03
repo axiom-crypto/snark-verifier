@@ -7,4 +7,8 @@ ignore = [
     # TODO: remove these ignores once inferno is updated to a fixed quick-xml range.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # optional revm pulls in crypto-bigint 0.5; we only use it to verify public
+    # inputs, without secret-key signing.
+    # TODO: remove this ignore once the elliptic-curve dependencies are upgraded.
+    "RUSTSEC-2026-0387",
 ]
